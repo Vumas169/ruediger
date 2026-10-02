@@ -10,7 +10,8 @@ Aufwand: einmalig ca. 30 Minuten. Kosten: keine (kostenlose Tarife von Supabase 
 | styles.css | Design |
 | app.js | Logik: Runden, Zeiten, Statistik, Abgleich |
 | config.js | Eure Einstellungen (Datenbank, Namen, Runden) |
-| setup.sql | Legt die Datenbank-Tabelle an |
+| setup.sql | Legt die Datenbank-Tabellen an (Neuinstallation) |
+| update-2.sql | Einmaliges Update für Pause und Termine |
 | manifest.webmanifest, sw.js | Machen die Webseite zur installierbaren App, auch offline |
 | icons/ | App-Symbol |
 | lib/supabase.js | Bibliothek für die Datenbank (nicht ändern) |
@@ -70,37 +71,37 @@ Danach auf jedem Handy unter "Optionen" einstellen, wer dort unterwegs ist. Die 
 
 ## Änderungen später
 
-Datei bei GitHub ersetzen. Damit die Handys die neue Version sicher laden, in sw.js die Zeile `const CACHE = "ruediger-v5";` hochzählen (v2, v3 ...).
+Geänderte Dateien bei GitHub hochladen (Add file > Upload files, gleichnamige Dateien werden ersetzt). Die Handys laden neue Versionen beim nächsten Öffnen automatisch. Ist die App gerade offen, erscheint oben "Neue Version verfügbar" mit dem Knopf "Aktualisieren". Unter Optionen steht die aktuelle Versionsnummer.
 
 ## So zählt die App
 
-- Es gibt keine Punkte. Gezählt werden Runden und Minuten.
+- Gezählt werden Runden und Minuten. Pausen zählen nicht zur Dauer.
 - Der Gassi-Tag läuft von 4:00 bis 4:00 Uhr. Eine Runde um 0:30 Uhr zählt zum Vortag.
+- Farben: Christopher gelb, Kim lila, zusammen blau.
 
 ## Bedienung
 
 Heute
-- ▶ startet die Zeitmessung, Stopp beendet sie.
+- ▶ startet die Zeitmessung, ⏸ pausiert, ▶ geht weiter, Stopp beendet.
 - Erledigt trägt eine Runde mit einem Tipp ein (Dauer = Durchschnitt genau dieser Runde aus den letzten 30 Tagen, ohne Werte 30 Minuten).
-- 👥 auf einer laufenden oder erledigten Runde: zusammen gegangen. Standard ist immer nur die Person, die auf diesem Handy eingestellt ist.
-- 💩 auf einer erledigten Runde: Rüdiger hat sein Häufchen gemacht.
+- 👥 auf einer laufenden oder erledigten Runde: zusammen gegangen.
+- 💩 auf einer erledigten Runde: jedes Antippen zählt ein Häufchen dazu. Korrigieren über die Runde.
+- Fällige Termine von Rüdiger stehen oben, ✓ hakt sie ab.
 
-Nachtragen
-- Tag wählen (Datum oder Heute/Gestern/Vorgestern).
-- Ø trägt die Runde mit der Durchschnittsdauer ein, Genau öffnet das Formular für Beginn, Dauer und wer dabei war.
+Nachtragen und korrigieren
+- Mit den Pfeilen oben zu einem früheren Tag gehen oder auf das Datum tippen und einen Tag wählen.
+- Ø trägt die Runde mit der Durchschnittsdauer ein, Genau öffnet das Formular.
+- Jede eingetragene Runde antippen, um Runde, Personen, Beginn, Dauer, Häufchen oder Notiz zu ändern oder sie zu löschen.
 
-Korrigieren
-- Jede eingetragene Runde antippen (unter Heute, Nachtragen oder über Verlauf). Änderbar sind Runde, Personen, Beginn, Dauer, Häufchen und Notiz. Löschen geht dort auch.
-
-Zählweise
-- Einträge über Erledigt oder Ø sind mit "ca." markiert und fließen nicht in künftige Durchschnitte ein.
-- Gemeinsame Runden zählen in der Statistik bei beiden Personen, in "Alle Runden" nur einmal.
-- Uhrzeit bei Erledigt: Wer gerade zurück ist, bekommt jetzt als Ende. Sonst wird die übliche Startzeit der Runde genommen.
+Termine
+- "+ Termin": Art wählen (Zeckenschutz, Wurmkur, Kotprobe, Allergietablette, Impfungen, Tierarzt-Check, Krallen, eigener Termin). Abstand und Erinnerungen sind vorbelegt und änderbar.
+- ✓ hakt einen Termin ab. Wiederkehrende Termine springen automatisch auf den nächsten Termin, gerechnet ab dem Tag des Abhakens.
+- Erinnerungen erscheinen in der App (oben unter Heute und als Zahl am Reiter Termine). "In Kalender" legt den Termin mit den gewählten Erinnerungen im Handy-Kalender an. Dort klingeln die Erinnerungen auch, wenn die App zu ist.
 
 ## Reiter
 
-- Heute: die vier Runden des Tages, mit den Pfeilen oben auch frühere Tage.
-- Nachtragen: vergessene Runden eintragen und korrigieren.
+- Heute: die Runden des Tages und fällige Termine.
 - Verlauf: Minuten der letzten 7 Tage nach Person, Kalender der letzten 4 Wochen. Tippen öffnet den Tag.
 - Statistik: wer wie oft gegangen ist (3 Tage, 7 Tage, 30 Tage, gesamt), Ø Dauer je Runde.
-- Optionen: wer auf diesem Handy unterwegs ist, Abgleich, Abmelden.
+- Termine: Rüdigers Behandlungen und Termine.
+- Optionen: wer auf diesem Handy unterwegs ist, Abgleich, Version.

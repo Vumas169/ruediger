@@ -4,6 +4,8 @@
 (() => {
   "use strict";
 
+  const APP_VERSION = "7 vom 02.10.2026";
+
   // ---------- Einstellungen ----------
   const CFG = Object.assign({
     WALKERS: ["Christopher", "Kim"],
@@ -28,13 +30,41 @@
     { id: "all", label: "Gesamt", days: 0 }
   ];
 
+  // Regelmäßige Behandlungen. Abstände sind Vorschläge und lassen sich je Termin ändern.
+  const CARE_TYPES = [
+    { id: "tick", icon: "🕷️", name: "Zeckenschutz", every: 1, unit: "m",
+      hint: "Abstand hängt vom Mittel ab: Spot-on und viele Tabletten monatlich, manche Tabletten alle 12 Wochen, Halsbänder mehrere Monate." },
+    { id: "worm", icon: "🪱", name: "Wurmkur", every: 3, unit: "m",
+      hint: "Ohne genaue Risikoeinschätzung empfiehlt ESCCAP mindestens 4 Entwurmungen oder Kotuntersuchungen pro Jahr." },
+    { id: "fecal", icon: "🔬", name: "Kotprobe", every: 3, unit: "m",
+      hint: "Alternative zur Wurmkur: Kot untersuchen lassen und nur bei Befund entwurmen." },
+    { id: "allergy", icon: "💊", name: "Allergietablette", every: 1, unit: "d", remind: [0],
+      hint: "Abstand nach Vorgabe des Tierarztes einstellen." },
+    { id: "vacc_shp", icon: "💉", name: "Impfung Staupe/Parvo/HCC", every: 3, unit: "y",
+      hint: "Nach der Grundimmunisierung je nach Impfstoff bis zu alle 3 Jahre." },
+    { id: "vacc_lepto", icon: "💉", name: "Impfung Leptospirose", every: 1, unit: "y",
+      hint: "Wird jährlich aufgefrischt." },
+    { id: "vacc_rabies", icon: "💉", name: "Impfung Tollwut", every: 3, unit: "y",
+      hint: "Je nach Impfstoff alle 1 bis 3 Jahre. Für Reisen ins Ausland muss sie gültig im Heimtierausweis stehen." },
+    { id: "vacc_kennel", icon: "💉", name: "Impfung Zwingerhusten", every: 1, unit: "y",
+      hint: "Jährlich, sinnvoll bei viel Hundekontakt oder Hundepension." },
+    { id: "checkup", icon: "🩺", name: "Tierarzt-Check", every: 1, unit: "y",
+      hint: "Jährliche Untersuchung, oft zusammen mit den Impfungen." },
+    { id: "claws", icon: "✂️", name: "Krallen schneiden", every: 6, unit: "w", hint: "" },
+    { id: "custom", icon: "📅", name: "Eigener Termin", every: 0, unit: "0", hint: "" }
+  ];
+  const careType = (id) => CARE_TYPES.find((t) => t.id === id) || CARE_TYPES[CARE_TYPES.length - 1];
+  const REMIND_OPTS = [{ d: 7, label: "1 Woche vorher" }, { d: 3, label: "3 Tage vorher" }, { d: 1, label: "1 Tag vorher" }, { d: 0, label: "Am Tag" }];
+  const UNIT_WORD = { d: ["Tag", "Tage"], w: ["Woche", "Wochen"], m: ["Monat", "Monate"], y: ["Jahr", "Jahre"] };
+
   // ---------- Lokaler Speicher ----------
   const ls = {
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* egal */ } }
   };
-  const P = DEMO ? "rr.demo4." : "rr.";
+  const P = DEMO ? "rr.demo5." : "rr.";
   let walks = ls.get(P + "walks", {});      // "YYYY-MM-DD|slot" -> Runde
+  let items = ls.get(P + "items", {});      // id -> { id, kind, data, updated_at }
   let pending = ls.get(P + "pending", []);  // noch nicht abgeglichene Änderungen
   let lastSync = ls.get(P + "lastSync", null);
   let me = ls.get("rr.me", CFG.WALKERS[0]);
@@ -48,18 +78,40 @@
   let viewDay = lastToday;
   let editing = null;   // { day, slot, newSlot }
   let sheetWalkers = [me], sheetPoo = 0, deleteArmed = false;
+  let apEditing = null, apRemind = [7, 3, 1], apDeleteArmed = false;
 
   const $ = (id) => document.getElementById(id);
   const key = (day, slot) => day + "|" + slot;
-  const opKey = (op) => op.op === "delete" ? key(op.day, op.slot) : key(op.rec.day, op.rec.slot);
-  const walkerColor = (w) => w === TOGETHER ? "var(--w3)" : "var(--w" + ((CFG.WALKERS.indexOf(w) % 2) + 1) + ")";
+  function opKey(op) {
+    if (op.op === "delete") return key(op.day, op.slot);
+    if (op.op === "upsert") return key(op.rec.day, op.rec.slot);
+    return "item|" + (op.item ? op.item.id : op.id);
+  }
+  const uid = () => (crypto.randomUUID ? crypto.randomUUID()
+    : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); }));
 
-  // Ältere Einträge (ein Name) in die Liste "walkers" umwandeln
+  // Farben: Christopher gelb, Kim lila, zusammen blau
+  function walkerColor(w) {
+    if (w === TOGETHER) return "var(--c-both)";
+    const i = CFG.WALKERS.indexOf(w);
+    return i < 0 ? "var(--muted)" : "var(--c" + ((i % 2) + 1) + ")";
+  }
+  function walkerInk(w) {
+    if (w === TOGETHER) return "var(--c-both-ink)";
+    const i = CFG.WALKERS.indexOf(w);
+    return i < 0 ? "#fff" : "var(--c" + ((i % 2) + 1) + "-ink)";
+  }
+  const recColorKey = (r) => isTogether(r) ? TOGETHER : r.walkers[0];
+
+  // Ältere Einträge an das aktuelle Format anpassen
   function normalize(r) {
     if (!r) return r;
     if (!Array.isArray(r.walkers)) r.walkers = r.walker ? [r.walker] : [];
     delete r.walker;
-    r.poo = Number(r.poo) || 0;   // früher ja/nein, jetzt Anzahl
+    r.poo = Number(r.poo) || 0;
+    r.pause_sec = Number(r.pause_sec) || 0;
+    if (!r.paused_at) r.paused_at = null;
+    if (!r.extra || typeof r.extra !== "object") r.extra = {};
     return r;
   }
   const isTogether = (r) => r.walkers.length > 1;
@@ -70,12 +122,22 @@
   function ymd(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
   function parseYmd(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
   function addDays(s, n) { const d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); }
+  function addInterval(s, every, unit) {
+    const d = parseYmd(s);
+    if (unit === "d") d.setDate(d.getDate() + every);
+    else if (unit === "w") d.setDate(d.getDate() + every * 7);
+    else if (unit === "m") { const day = d.getDate(); d.setDate(1); d.setMonth(d.getMonth() + every); d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate())); }
+    else if (unit === "y") d.setFullYear(d.getFullYear() + every);
+    return ymd(d);
+  }
+  const daysBetween = (a, b) => Math.round((parseYmd(b) - parseYmd(a)) / 86400000);
   function gassiDay(date) {
     const d = new Date(date);
     if (d.getHours() < CFG.DAY_START_HOUR) d.setDate(d.getDate() - 1);
     return ymd(d);
   }
   function todayStr() { return gassiDay(new Date()); }
+  const calToday = () => ymd(new Date());   // Kalendertag für Termine
   function hm(iso) { const d = new Date(iso); return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
   function combine(day, time) {
     const [h, m] = time.split(":").map(Number);
@@ -88,22 +150,30 @@
   const fmtDate = (s) => parseYmd(s).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
   const fmtDateShort = (s) => parseYmd(s).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "long" });
   const fmtDay = (s) => parseYmd(s).toLocaleDateString("de-DE", { day: "numeric", month: "long", year: "numeric" });
+  const fmtDM = (s) => parseYmd(s).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
   const fmtNum = (n) => n.toLocaleString("de-DE");
 
-  // ---------- Auswertung ----------
+  // ---------- Auswertung Runden ----------
   const isDone = (r) => !!(r && r.ended_at);
   const isRunning = (r) => !!(r && r.started_at && !r.ended_at);
+  const isPaused = (r) => isRunning(r) && !!r.paused_at;
   function minutesOf(r) {
     if (r.duration_min != null) return r.duration_min;
-    if (r.started_at && r.ended_at) return Math.max(0, Math.round((new Date(r.ended_at) - new Date(r.started_at)) / 60000));
+    if (r.started_at && r.ended_at) return Math.max(0, Math.round(((new Date(r.ended_at) - new Date(r.started_at)) / 1000 - (r.pause_sec || 0)) / 60));
     return 0;
+  }
+  // Reine Gehzeit in Sekunden (ohne Pausen)
+  function activeSec(r, now) {
+    const t = now || Date.now();
+    let s = (t - new Date(r.started_at)) / 1000 - (r.pause_sec || 0);
+    if (r.paused_at) s -= (t - new Date(r.paused_at)) / 1000;
+    return Math.max(0, Math.floor(s));
   }
   function dayStats(day) {
     let rounds = 0, mins = 0;
     for (let s = 1; s <= NR; s++) { const r = walks[key(day, s)]; if (isDone(r)) { rounds++; mins += minutesOf(r); } }
     return { rounds, mins };
   }
-  // Gemessene Runden einer Runde aus den letzten 30 Tagen (ohne geschätzte Einträge)
   function history(slot) {
     const t = todayStr(), out = [];
     for (let i = 1; i <= 30; i++) {
@@ -117,7 +187,6 @@
     if (!list.length) return CFG.DEFAULT_MINUTES;
     return Math.round(list.reduce((a, r) => a + minutesOf(r), 0) / list.length);
   }
-  // Übliche Startzeit, gerechnet ab Tagesbeginn (4:00), damit 23:50 und 0:10 sauber mitteln
   function typicalStart(slot) {
     const offs = history(slot).filter((r) => r.started_at).map((r) => {
       const d = new Date(r.started_at);
@@ -129,13 +198,39 @@
     return pad(Math.floor(mins / 60)) + ":" + pad(mins % 60);
   }
 
+  // ---------- Auswertung Termine ----------
+  const appointments = () => Object.values(items).filter((i) => i.kind === "appointment" && !i.data.archived);
+  const apDays = (ap) => daysBetween(calToday(), ap.data.due);
+  const apTitle = (ap) => ap.data.name || careType(ap.data.type).name;
+  // Vorne unter "Heute" nur, was in weniger als einer Woche fällig ist (oder überfällig)
+  function apActive(ap) {
+    const d = apDays(ap);
+    if (d <= 0) return true;
+    if (d >= 7) return false;
+    const r = ap.data.remind || [];
+    return r.length ? d <= Math.max(...r) : false;
+  }
+  function apStatus(ap) {
+    const d = apDays(ap);
+    if (d < 0) return { text: "überfällig seit " + (-d === 1 ? "1 Tag" : -d + " Tagen"), cls: "late" };
+    if (d === 0) return { text: "heute fällig" + (ap.data.time ? " um " + ap.data.time + " Uhr" : ""), cls: "now" };
+    if (d === 1) return { text: "morgen" + (ap.data.time ? " um " + ap.data.time + " Uhr" : ""), cls: "soon" };
+    return { text: "in " + d + " Tagen · " + fmtDM(ap.data.due), cls: d <= 7 ? "soon" : "" };
+  }
+  function everyText(d) {
+    if (!d.unit || d.unit === "0" || !d.every) return "einmalig";
+    const w = UNIT_WORD[d.unit];
+    return d.every === 1 ? (d.unit === "d" ? "täglich" : "jede" + (d.unit === "w" ? " Woche" : d.unit === "m" ? "n Monat" : "s Jahr"))
+      : "alle " + d.every + " " + w[1];
+  }
+
   // ---------- Speichern ----------
-  function persist() { ls.set(P + "walks", walks); ls.set(P + "pending", pending); }
+  function persist() { ls.set(P + "walks", walks); ls.set(P + "items", items); ls.set(P + "pending", pending); }
   function queue(op) { const k = opKey(op); pending = pending.filter((p) => opKey(p) !== k); pending.push(op); }
 
   function saveRec(rec) {
     rec.updated_at = new Date().toISOString();
-    walks[key(rec.day, rec.slot)] = rec;
+    walks[key(rec.day, rec.slot)] = normalize(rec);
     if (!DEMO) queue({ op: "upsert", rec });
     persist(); render(); flush();
   }
@@ -145,6 +240,17 @@
     if (quiet) return;
     persist(); render(); flush();
   }
+  function saveItem(item) {
+    item.updated_at = new Date().toISOString();
+    items[item.id] = item;
+    if (!DEMO) queue({ op: "item", item });
+    persist(); render(); flush();
+  }
+  function deleteItem(id) {
+    delete items[id];
+    if (!DEMO) queue({ op: "itemDel", id });
+    persist(); render(); flush();
+  }
 
   // ---------- Abgleich mit Supabase ----------
   function rowFor(r) {
@@ -152,8 +258,16 @@
       day: r.day, slot: r.slot, walkers: r.walkers || [],
       started_at: r.started_at || null, ended_at: r.ended_at || null,
       duration_min: r.duration_min == null ? null : r.duration_min,
-      estimated: !!r.estimated, poo: Number(r.poo) || 0, note: r.note || null, updated_at: r.updated_at
+      estimated: !!r.estimated, poo: Number(r.poo) || 0, note: r.note || null,
+      paused_at: r.paused_at || null, pause_sec: Number(r.pause_sec) || 0, extra: r.extra || {},
+      updated_at: r.updated_at
     };
+  }
+  async function runOp(op) {
+    if (op.op === "upsert") return sb.from("walks").upsert(rowFor(op.rec), { onConflict: "day,slot" });
+    if (op.op === "delete") return sb.from("walks").delete().eq("day", op.day).eq("slot", op.slot);
+    if (op.op === "item") return sb.from("app_data").upsert({ id: op.item.id, kind: op.item.kind, data: op.item.data, updated_at: op.item.updated_at });
+    return sb.from("app_data").delete().eq("id", op.id);
   }
   async function flush() {
     if (DEMO || !session || syncing) return;
@@ -162,9 +276,7 @@
     try {
       while (pending.length) {
         const op = pending[0];
-        const res = op.op === "upsert"
-          ? await sb.from("walks").upsert(rowFor(op.rec), { onConflict: "day,slot" })
-          : await sb.from("walks").delete().eq("day", op.day).eq("slot", op.slot);
+        const res = await runOp(op);
         if (res.error) throw res.error;
         pending = pending.filter((p) => p !== op);
         persist();
@@ -177,10 +289,10 @@
       render();
     }
   }
-  async function fetchAll() {
+  async function fetchAll(table, order) {
     const rows = [];
     for (let from = 0; ; from += 1000) {
-      const { data, error } = await sb.from("walks").select("*").order("day").range(from, from + 999);
+      const { data, error } = await sb.from(table).select("*").order(order).range(from, from + 999);
       if (error) throw error;
       rows.push(...data);
       if (data.length < 1000) return rows;
@@ -189,16 +301,24 @@
   async function pull() {
     if (DEMO || !session || !navigator.onLine) { render(); return; }
     await flush();
-    let data;
-    try { data = await fetchAll(); } catch (e) { syncError = (e && e.message) || String(e); render(); return; }
     const waiting = new Set(pending.map(opKey));
-    const next = {};
-    for (const [k, r] of Object.entries(walks)) if (waiting.has(k)) next[k] = r;
-    for (const r of data) { const k = key(r.day, r.slot); if (!waiting.has(k)) next[k] = normalize({ ...r }); }
-    walks = next;
-    lastSync = new Date().toISOString();
-    ls.set(P + "lastSync", lastSync);
-    syncError = null;
+    let err = null;
+    try {
+      const data = await fetchAll("walks", "day");
+      const next = {};
+      for (const [k, r] of Object.entries(walks)) if (waiting.has(k)) next[k] = r;
+      for (const r of data) { const k = key(r.day, r.slot); if (!waiting.has(k)) next[k] = normalize({ ...r }); }
+      walks = next;
+    } catch (e) { err = e; }
+    try {
+      const data = await fetchAll("app_data", "updated_at");
+      const next = {};
+      for (const [id, it] of Object.entries(items)) if (waiting.has("item|" + id)) next[id] = it;
+      for (const r of data) if (!waiting.has("item|" + r.id)) next[r.id] = { id: r.id, kind: r.kind, data: r.data || {}, updated_at: r.updated_at };
+      items = next;
+    } catch (e) { err = err || e; }
+    syncError = err ? ((err && err.message) || String(err)) : null;
+    if (!err) { lastSync = new Date().toISOString(); ls.set(P + "lastSync", lastSync); }
     persist(); render();
   }
   let pullTimer = null;
@@ -212,14 +332,15 @@
     showLogin(!session);
     applyLoginWalker();
     sb.auth.onAuthStateChange((_evt, s) => { session = s; showLogin(!s); if (s) { applyLoginWalker(); schedulePull(); } render(); });
-    sb.channel("walks-live")
+    sb.channel("live")
       .on("postgres_changes", { event: "*", schema: "public", table: "walks" }, () => schedulePull())
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_data" }, () => schedulePull())
       .subscribe();
     if (session) schedulePull();
   }
   function showLogin(show) { $("login").hidden = !show; }
 
-  // Wer bin ich? Gespeichert am Konto, sonst aus der E-Mail-Adresse erraten (z. B. kim.xyz@... = Kim).
+  // Wer bin ich? Gespeichert am Konto, sonst aus der E-Mail-Adresse erraten.
   function applyLoginWalker() {
     if (!session || !session.user) return;
     const saved = session.user.user_metadata && session.user.user_metadata.walker;
@@ -252,51 +373,111 @@
         const dur = Math.max(5, (base[idx] || 25) + Math.round((rnd() - 0.5) * 16));
         const s = new Date(new Date(combine(day, r.time)).getTime() + Math.round((rnd() - 0.5) * 50) * 60000);
         const x = rnd();
-        const walkers = x < 0.15 ? CFG.WALKERS.slice() : [CFG.WALKERS[x < 0.6 ? 0 : 1] || CFG.WALKERS[0]];
-        walks[key(day, slot)] = {
-          day, slot, walkers,
+        const ws = x < 0.15 ? CFG.WALKERS.slice() : [CFG.WALKERS[x < 0.6 ? 0 : 1] || CFG.WALKERS[0]];
+        walks[key(day, slot)] = normalize({
+          day, slot, walkers: ws,
           started_at: s.toISOString(), ended_at: new Date(s.getTime() + dur * 60000).toISOString(),
           duration_min: dur, estimated: false, poo: rnd() < 0.45 ? (rnd() < 0.25 ? 2 : 1) : 0, note: "", updated_at: s.toISOString()
-        };
+        });
       });
     }
+    const ct = calToday();
+    [["tick", 3, [7, 3, 1]], ["allergy", 0, [0]], ["worm", 24, [7, 3, 1]], ["vacc_lepto", 118, [7, 3, 1]]].forEach(([type, inDays, remind]) => {
+      const c = careType(type);
+      const id = uid();
+      items[id] = { id, kind: "appointment", updated_at: new Date().toISOString(),
+        data: { type, name: "", due: addDays(ct, inDays), time: "", every: c.every, unit: c.unit, remind, note: "", lastDone: null, history: [] } };
+    });
     ls.set(P + "seeded", true);
     persist();
   }
 
-  // ---------- Aktionen ----------
+  // ---------- Aktionen Runden ----------
   function startWalk(slot) {
     saveRec({ day: todayStr(), slot, walkers: [me], started_at: new Date().toISOString(), ended_at: null,
-      duration_min: null, estimated: false, poo: 0, note: "" });
+      duration_min: null, estimated: false, poo: 0, note: "", paused_at: null, pause_sec: 0 });
   }
-  function stopWalk(rec) {
-    const now = new Date();
-    saveRec({ ...rec, ended_at: now.toISOString(),
-      duration_min: Math.max(1, Math.round((now - new Date(rec.started_at)) / 60000)) });
+  function pauseWalk(rec) { saveRec({ ...rec, paused_at: new Date().toISOString() }); }
+  function resumeWalk(rec) {
+    const add = Math.round((Date.now() - new Date(rec.paused_at)) / 1000);
+    saveRec({ ...rec, paused_at: null, pause_sec: (rec.pause_sec || 0) + add });
   }
-  // Ein Tipp: Runde mit der Durchschnittsdauer genau dieser Runde eintragen.
-  // Heute und gerade zurück? Dann endet die Runde jetzt. Sonst zur üblichen Zeit der Runde.
+  function finished(rec, startIso) {
+    const now = Date.now();
+    let pause = rec.pause_sec || 0;
+    if (rec.paused_at) pause += Math.round((now - new Date(rec.paused_at)) / 1000);
+    const start = startIso || rec.started_at;
+    const mins = Math.max(1, Math.round(((now - new Date(start)) / 1000 - pause) / 60));
+    return { started_at: start, ended_at: new Date(now).toISOString(), duration_min: mins, pause_sec: pause, paused_at: null };
+  }
+  function stopWalk(rec) { saveRec({ ...rec, ...finished(rec) }); }
   function quickDone(day, slot) {
     const dur = avgDuration(slot);
     const usual = new Date(combine(day, typicalStart(slot)));
     const now = new Date();
     let start = usual;
-    if (day === todayStr() && now > usual && now - usual < (dur + 120) * 60000) {
-      start = new Date(now.getTime() - dur * 60000);
-    }
+    if (day === todayStr() && now > usual && now - usual < (dur + 120) * 60000) start = new Date(now.getTime() - dur * 60000);
     if (start > now) start = new Date(now.getTime() - dur * 60000);
     saveRec({ day, slot, walkers: [me], started_at: start.toISOString(),
       ended_at: new Date(start.getTime() + dur * 60000).toISOString(),
-      duration_min: dur, estimated: true, poo: 0, note: "" });
+      duration_min: dur, estimated: true, poo: 0, note: "", paused_at: null, pause_sec: 0 });
     toast(ROUNDS[slot - 1].name + " eingetragen: " + hm(start.toISOString()) + " Uhr, " + dur + " min. Antippen zum Ändern.");
   }
   function addPoo(rec) { saveRec({ ...rec, poo: (rec.poo || 0) + 1 }); }
-  // Zu zweit an/aus. Die Person, die die Runde angelegt hat, bleibt vorne.
   function toggleTogether(rec) {
     const first = rec.walkers[0] || me;
-    const walkers = isTogether(rec) ? [first] : [first, ...CFG.WALKERS.filter((w) => w !== first)];
-    saveRec({ ...rec, walkers });
+    const ws = isTogether(rec) ? [first] : [first, ...CFG.WALKERS.filter((w) => w !== first)];
+    saveRec({ ...rec, walkers: ws });
   }
+
+  // ---------- Aktionen Termine ----------
+  function apDone(ap) {
+    const today = calToday();
+    const d = { ...ap.data, lastDone: today, history: [...(ap.data.history || []), today].slice(-50) };
+    if (d.unit && d.unit !== "0" && d.every) {
+      d.due = addInterval(today, d.every, d.unit);
+      toast(apTitle(ap) + " erledigt. Nächster Termin: " + fmtDM(d.due));
+    } else {
+      d.archived = true;
+      toast(apTitle(ap) + " erledigt");
+    }
+    saveItem({ ...ap, data: d });
+  }
+
+  function icsFor(ap) {
+    const d = ap.data;
+    const esc = (s) => String(s).replace(/[\\;,]/g, (m) => "\\" + m).replace(/\n/g, "\\n");
+    const dt = d.due.replace(/-/g, "");
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+    const L = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Ruedigers Runden//DE", "CALSCALE:GREGORIAN", "BEGIN:VEVENT",
+      "UID:" + ap.id + "@ruediger", "DTSTAMP:" + stamp, "SUMMARY:" + esc("Rüdiger: " + apTitle(ap))];
+    if (d.time) { L.push("DTSTART:" + dt + "T" + d.time.replace(":", "") + "00", "DURATION:PT30M"); }
+    else { L.push("DTSTART;VALUE=DATE:" + dt, "DTEND;VALUE=DATE:" + addDays(d.due, 1).replace(/-/g, "")); }
+    if (d.unit && d.unit !== "0" && d.every) {
+      const f = { d: "DAILY", w: "WEEKLY", m: "MONTHLY", y: "YEARLY" }[d.unit];
+      L.push("RRULE:FREQ=" + f + ";INTERVAL=" + d.every);
+    }
+    if (d.note) L.push("DESCRIPTION:" + esc(d.note));
+    for (const days of d.remind || []) {
+      // Ganztägig: Erinnerung um 9 Uhr am jeweiligen Tag
+      const trig = d.time ? (days ? "-P" + days + "D" : "-PT1H") : (days ? "-P" + (days - 1) + "DT15H" : "PT9H");
+      L.push("BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:" + esc(apTitle(ap)), "TRIGGER:" + trig, "END:VALARM");
+    }
+    L.push("END:VEVENT", "END:VCALENDAR");
+    return L.join("\r\n");
+  }
+  function exportIcs(ap) {
+    const ics = icsFor(ap);
+    const name = "ruediger-" + apTitle(ap).toLowerCase().replace(/[^a-z0-9äöüß]+/g, "-") + ".ics";
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    if (ios) { location.href = "data:text/calendar;charset=utf-8," + encodeURIComponent(ics); return; }
+    const url = URL.createObjectURL(new Blob([ics], { type: "text/calendar" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
   let toastTimer = null;
   function toast(msg) {
     const el = $("toast");
@@ -322,16 +503,16 @@
     b.setAttribute("aria-label", aria);
     return b;
   }
-  function elapsed(iso) {
-    const s = Math.max(0, Math.floor((Date.now() - new Date(iso)) / 1000));
-    const m = Math.floor(s / 60);
-    return m >= 60 ? Math.floor(m / 60) + ":" + pad(m % 60) + " h" : m + ":" + pad(s % 60) + " min";
+  function clock(sec) {
+    const m = Math.floor(sec / 60);
+    return m >= 60 ? Math.floor(m / 60) + ":" + pad(m % 60) + " h" : m + ":" + pad(sec % 60) + " min";
   }
   function metaNode(rec) {
     const span = h("span", { class: "rmeta" });
     if (!rec) { span.textContent = "Offen"; return span; }
     if (isRunning(rec)) {
-      span.append("Läuft seit ", h("span", { "data-since": rec.started_at }, elapsed(rec.started_at)), " · " + whoText(rec));
+      const live = h("span", { "data-run": "1", "data-start": rec.started_at, "data-pause": String(rec.pause_sec || 0), "data-paused": rec.paused_at || "" }, clock(activeSec(rec)));
+      span.append(isPaused(rec) ? "Pause · " : "Läuft · ", live, isPaused(rec) ? " gelaufen" : "", " · " + whoText(rec));
       return span;
     }
     const parts = [];
@@ -344,13 +525,13 @@
     return span;
   }
 
-  // Karten für die vier Runden eines Tages.
-  // live = Heute-Ansicht für den heutigen Tag (▶ und Erledigt), sonst Nachtragen (Ø und Genau).
+  // Karten für die vier Runden eines Tages. live = heute (▶, Pause, Erledigt), sonst Nachtragen (Ø, Genau).
   function renderRoundList(ol, day, live) {
     ol.textContent = "";
     ROUNDS.forEach((r, i) => {
       const slot = i + 1, rec = walks[key(day, slot)];
-      const li = h("li", { class: "round" + (isDone(rec) ? " done" : isRunning(rec) ? " running" : "") });
+      const li = h("li", { class: "round" + (isDone(rec) ? " done" : isRunning(rec) ? " running" : "") + (isPaused(rec) ? " paused" : "") });
+      if (rec) { li.style.setProperty("--wc", walkerColor(recColorKey(rec))); li.style.setProperty("--wc-ink", walkerInk(recColorKey(rec))); }
       li.append(h("span", { class: "num", "aria-hidden": "true" }, isDone(rec) ? "✓" : String(slot)));
       const body = h("button", { class: "rbody", type: "button", "aria-label": r.name + (rec ? " korrigieren" : " eintragen") });
       body.append(h("span", { class: "rname" }, r.name), metaNode(rec));
@@ -358,10 +539,14 @@
       li.append(body);
       const act = h("div", { class: "ractions" });
       const together = rec && CFG.WALKERS.length > 1
-        ? toggleBtn("👥", "iconchip", isTogether(rec), isTogether(rec) ? "Zusammen gegangen, antippen für allein" : "Zusammen gegangen?", () => toggleTogether(rec))
+        ? toggleBtn("👥", "iconchip both", isTogether(rec), isTogether(rec) ? "Zusammen gegangen, antippen für allein" : "Zusammen gegangen?", () => toggleTogether(rec))
         : null;
       if (isRunning(rec)) {
-        act.append(together, button("Stopp", "btn small run", () => stopWalk(rec)));
+        const pb = isPaused(rec)
+          ? button("▶", "iconchip pause on", () => resumeWalk(rec))
+          : button("⏸", "iconchip pause", () => pauseWalk(rec));
+        pb.setAttribute("aria-label", isPaused(rec) ? "Weitergehen" : "Pause");
+        act.append(together, pb, button("Stopp", "btn small run", () => stopWalk(rec)));
       } else if (isDone(rec)) {
         const p = toggleBtn("💩", "iconchip poo", rec.poo > 0, "Häufchen dazuzählen, bisher " + rec.poo, () => addPoo(rec));
         if (rec.poo > 1) p.append(h("span", { class: "count" }, String(rec.poo)));
@@ -382,10 +567,11 @@
   // ---------- Darstellung ----------
   function render() {
     renderHeader();
+    renderBadge();
     if (view === "today") renderToday();
-    if (view === "add") renderAdd();
     if (view === "history") renderHistory();
     if (view === "stats") renderStats();
+    if (view === "care") renderCare();
     if (view === "settings") renderSettings();
   }
 
@@ -393,6 +579,8 @@
     const t = todayStr();
     $("dayEyebrow").textContent = viewDay === t ? "Heute" : viewDay === addDays(t, -1) ? "Gestern" : "Nachtragen";
     $("dayDate").textContent = fmtDateShort(viewDay);
+    $("pickDay").max = t;
+    $("pickDay").value = viewDay;
     $("nextDay").disabled = viewDay >= t;
     const ds = dayStats(viewDay);
     $("points").textContent = String(ds.mins);
@@ -404,7 +592,8 @@
     for (let i = 0; i < NR; i++) {
       const rec = walks[key(viewDay, i + 1)];
       const cls = isDone(rec) ? "seg-done" : isRunning(rec) ? "seg-run" : "seg-empty";
-      html += `<circle class="${cls}" cx="60" cy="60" r="50" stroke-dasharray="${(len - gap).toFixed(2)} ${C.toFixed(2)}" stroke-dashoffset="${(-(i * len + gap / 2)).toFixed(2)}"></circle>`;
+      const style = isDone(rec) ? ` style="stroke:${walkerColor(recColorKey(rec))}"` : "";
+      html += `<circle class="${cls}"${style} cx="60" cy="60" r="50" stroke-dasharray="${(len - gap).toFixed(2)} ${C.toFixed(2)}" stroke-dashoffset="${(-(i * len + gap / 2)).toFixed(2)}"></circle>`;
     }
     $("ring").innerHTML = html;
 
@@ -412,32 +601,42 @@
     let msg = "", warn = false;
     if (DEMO) { msg = "Testmodus: Daten bleiben auf diesem Gerät"; warn = true; }
     else if (!navigator.onLine) { msg = "Offline. Wird später abgeglichen"; warn = true; }
-    else if (syncError) { msg = "Abgleich hat nicht geklappt. Nächster Versuch läuft automatisch"; warn = true; }
+    else if (syncError) { msg = "Abgleich hat nicht geklappt. Details unter Optionen"; warn = true; }
     else if (pending.length) msg = pending.length === 1 ? "1 Änderung wird abgeglichen" : pending.length + " Änderungen werden abgeglichen";
     else if (lastSync) msg = "Abgeglichen um " + hm(lastSync) + " Uhr";
     st.textContent = msg;
     st.classList.toggle("warn", warn);
   }
 
-  function renderToday() {
-    const isToday = viewDay === todayStr();
-    renderRoundList($("rounds"), viewDay, isToday);
-
+  function renderBadge() {
+    const n = appointments().filter(apActive).length;
+    const b = $("careBadge");
+    b.hidden = !n;
+    b.textContent = String(n);
+    try {
+      if (n && navigator.setAppBadge) navigator.setAppBadge(n).catch(() => {});
+      else if (!n && navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
+    } catch { /* nicht unterstützt */ }
   }
 
-  function renderAdd() {
-    const t = todayStr();
-    const inp = $("addDate");
-    inp.max = t;
-    inp.value = viewDay;
-    const chips = $("dateChips");
-    chips.textContent = "";
-    [["Heute", t], ["Gestern", addDays(t, -1)], ["Vorgestern", addDays(t, -2)]].forEach(([label, d]) => {
-      const b = button(label, "chip", () => { viewDay = d; render(); });
-      b.setAttribute("aria-pressed", String(viewDay === d));
-      chips.append(b);
-    });
-    renderRoundList($("addRounds"), viewDay, false);
+  function renderToday() {
+    const isToday = viewDay === todayStr();
+    const rem = $("reminders");
+    rem.textContent = "";
+    if (isToday) {
+      const act = appointments().filter(apActive).sort((a, b) => a.data.due.localeCompare(b.data.due));
+      for (const ap of act) {
+        const st = apStatus(ap);
+        const row = h("div", { class: "remind " + st.cls },
+          h("span", { class: "remicon", "aria-hidden": "true" }, careType(ap.data.type).icon),
+          h("button", { class: "remtext", type: "button" }, h("b", {}, apTitle(ap)), h("span", {}, st.text)),
+          button("✓", "iconchip ok", () => apDone(ap)));
+        row.querySelector(".remtext").onclick = () => setView("care");
+        row.lastChild.setAttribute("aria-label", apTitle(ap) + " erledigt");
+        rem.append(row);
+      }
+    }
+    renderRoundList($("rounds"), viewDay, isToday);
   }
 
   function renderHistory() {
@@ -452,7 +651,7 @@
         if (!isDone(r)) continue;
         const m = minutesOf(r);
         total += m;
-        const c = isTogether(r) ? TOGETHER : r.walkers[0];
+        const c = recColorKey(r);
         if (c in by) by[c] += m;
       }
       return { d, by, total };
@@ -482,7 +681,7 @@
     for (const c of cats) {
       const dot = h("span", { class: "dot" });
       dot.style.background = walkerColor(c);
-      keys.append(h("span", { class: "keyitem" }, dot, c === TOGETHER ? "Zusammen" : c));
+      keys.append(h("span", { class: "keyitem" }, dot, c));
     }
 
     const grid = $("grid4");
@@ -501,7 +700,6 @@
     }
   }
 
-  // Gemeinsame Runden zählen bei jeder beteiligten Person voll, in "Alle Runden" nur einmal.
   function periodStats(p) {
     const t = todayStr();
     const from = p.days ? addDays(t, -(p.days - 1)) : null;
@@ -535,8 +733,7 @@
 
     const wb = $("whoBlock");
     wb.textContent = "";
-    const span = p.days ? "letzte " + p.days + " Tage inkl. heute"
-      : (s.first ? "seit " + fmtDay(s.first) : "noch keine Runden");
+    const span = p.days ? "letzte " + p.days + " Tage inkl. heute" : (s.first ? "seit " + fmtDay(s.first) : "noch keine Runden");
     wb.append(h("h2", {}, "Wer war wie oft draußen? ", h("span", { class: "sub" }, span)));
     const maxR = Math.max(1, ...Object.values(s.by).map((x) => x.rounds));
     for (const w of CFG.WALKERS) {
@@ -545,11 +742,13 @@
       const fill = h("div", { class: "fill" });
       fill.style.width = (x.rounds / maxR * 100) + "%";
       fill.style.background = walkerColor(w);
-      wb.append(h("div", { class: "whocard" },
+      const card = h("div", { class: "whocard" },
         h("div", { class: "whohead" }, h("span", { class: "whoname" }, w), h("span", { class: "whobig" }, String(x.rounds)),
           h("span", { class: "whounit" }, x.rounds === 1 ? "Runde" : "Runden")),
         h("div", { class: "track" }, fill),
-        h("div", { class: "whometa" }, "bei " + share + " % aller Runden dabei · davon " + x.together + " zusammen · " + fmtNum(x.mins) + " min · " + x.poo + " 💩")));
+        h("div", { class: "whometa" }, "bei " + share + " % aller Runden dabei · davon " + x.together + " zusammen · " + fmtNum(x.mins) + " min · " + x.poo + " 💩"));
+      card.style.borderLeftColor = walkerColor(w);
+      wb.append(card);
     }
     wb.append(h("p", { class: "legend" }, "Alle Runden: " + s.total.rounds + ", davon " + s.total.together + " zusammen. " +
       fmtNum(s.total.mins) + " Minuten, " + s.total.poo + " Häufchen. Gemeinsame Runden zählen bei beiden."));
@@ -574,12 +773,33 @@
     });
   }
 
+  function renderCare() {
+    const list = appointments().sort((a, b) => a.data.due.localeCompare(b.data.due));
+    const ol = $("careList");
+    ol.textContent = "";
+    $("careEmpty").hidden = list.length > 0;
+    for (const ap of list) {
+      const st = apStatus(ap);
+      const t = careType(ap.data.type);
+      const body = h("button", { class: "carebody", type: "button", "aria-label": apTitle(ap) + " bearbeiten" },
+        h("span", { class: "carename" }, apTitle(ap)),
+        h("span", { class: "carestatus " + st.cls }, st.text),
+        h("span", { class: "caremeta" }, everyText(ap.data) + (ap.data.lastDone ? " · zuletzt " + fmtDM(ap.data.lastDone) : "")));
+      body.onclick = () => openApSheet(ap);
+      const ok = button("✓", "iconchip ok", () => apDone(ap));
+      ok.setAttribute("aria-label", apTitle(ap) + " erledigt");
+      ol.append(h("li", { class: "careitem " + st.cls }, h("span", { class: "careicon", "aria-hidden": "true" }, t.icon), body, ok));
+    }
+  }
+
   function renderSettings() {
     const chips = $("meChips");
     chips.textContent = "";
     for (const w of CFG.WALKERS) {
       const b = button(w, "chip", () => { me = w; ls.set("rr.me", w); saveWalkerToAccount(w); renderSettings(); });
       b.setAttribute("aria-pressed", String(w === me));
+      b.style.setProperty("--chip-on", walkerColor(w));
+      b.style.setProperty("--chip-on-ink", walkerInk(w));
       chips.append(b);
     }
     let info;
@@ -595,13 +815,14 @@
     $("syncNow").hidden = DEMO;
     $("logout").hidden = DEMO || !session;
     $("demoBlock").hidden = !DEMO;
+    $("versionInfo").textContent = "Version " + APP_VERSION + ". Neue Versionen werden beim Öffnen automatisch geladen.";
     $("rulesInfo").textContent =
       "Der Gassi-Tag läuft von " + CFG.DAY_START_HOUR + ":00 bis " + CFG.DAY_START_HOUR + ":00 Uhr, eine Runde um 0:30 Uhr zählt also zum Vortag. " +
       "Erledigt und Ø nehmen die durchschnittliche Dauer derselben Runde aus den letzten 30 Tagen. Gibt es dafür noch keine Werte, sind es " + CFG.DEFAULT_MINUTES + " Minuten. " +
-      "Solche Einträge sind mit ca. markiert und fließen nicht in spätere Durchschnitte ein. Gemeinsame Runden zählen in der Statistik bei beiden.";
+      "Pausen zählen nicht zur Dauer. Gemeinsame Runden zählen in der Statistik bei beiden.";
   }
 
-  // ---------- Bearbeiten ----------
+  // ---------- Runde bearbeiten ----------
   function renderSheetChips() {
     const sc = $("slotChips");
     sc.textContent = "";
@@ -610,7 +831,6 @@
       const taken = slot !== editing.slot && walks[key(editing.day, slot)];
       const b = button(r.name, "chip" + (taken ? " taken" : ""), () => { editing.newSlot = slot; $("sheetError").textContent = ""; renderSheetChips(); });
       b.setAttribute("aria-pressed", String(slot === editing.newSlot));
-      if (taken) b.title = "Schon eingetragen";
       sc.append(b);
     });
     const wc = $("walkerChips");
@@ -622,13 +842,16 @@
         renderSheetChips();
       });
       b.setAttribute("aria-pressed", String(sheetWalkers.includes(w)));
+      b.style.setProperty("--chip-on", walkerColor(w));
+      b.style.setProperty("--chip-on-ink", walkerInk(w));
       wc.append(b);
     }
     $("pooVal").textContent = sheetPoo ? "💩".repeat(Math.min(sheetPoo, 5)) + (sheetPoo > 5 ? " " + sheetPoo : "") : "keins";
     $("pooMinus").disabled = sheetPoo === 0;
     $("fDur").placeholder = "Ø " + avgDuration(editing.newSlot);
-    $("durHint").textContent = isRunning(walks[key(editing.day, editing.slot)])
-      ? "Die Runde läuft noch. Jetzt beenden stoppt die Zeit."
+    const rec = walks[key(editing.day, editing.slot)];
+    $("durHint").textContent = isRunning(rec)
+      ? "Die Runde läuft noch. Jetzt beenden stoppt die Zeit, Pausen werden abgezogen."
       : "Dauer leer lassen = Ø dieser Runde (" + avgDuration(editing.newSlot) + " min).";
   }
   function openSheet(day, slot, exact) {
@@ -641,7 +864,7 @@
     $("sheetSub").textContent = fmtDate(day);
     $("sheetError").textContent = "";
     $("fTime").value = rec ? hm(rec.started_at || rec.ended_at) : typicalStart(slot);
-    $("fDur").value = rec ? (minutesOf(rec) || "") : (exact ? avgDuration(slot) : "");
+    $("fDur").value = rec ? (isRunning(rec) ? "" : (minutesOf(rec) || "")) : (exact ? avgDuration(slot) : "");
     $("fDur").disabled = isRunning(rec);
     $("fNote").value = (rec && rec.note) || "";
     $("fDelete").hidden = !rec;
@@ -650,9 +873,8 @@
     renderSheetChips();
     $("sheet").hidden = false;
     $("sheetBg").hidden = false;
-    if (exact) setTimeout(() => $("fTime").focus(), 50);
   }
-  function closeSheet() { $("sheet").hidden = true; $("sheetBg").hidden = true; editing = null; }
+  function closeSheet() { $("sheet").hidden = true; $("apSheet").hidden = true; $("sheetBg").hidden = true; editing = null; apEditing = null; }
 
   function submitSheet(stopNow) {
     if (!editing) return;
@@ -667,20 +889,20 @@
     const dur = durRaw === "" ? null : Math.max(1, Math.min(300, parseInt(durRaw, 10) || 1));
     const rec = {
       day, slot: newSlot, walkers: sheetWalkers.slice(), poo: sheetPoo, estimated: false,
-      note: $("fNote").value.trim(), started_at: combine(day, time), ended_at: null, duration_min: null
+      note: $("fNote").value.trim(), started_at: combine(day, time), ended_at: null, duration_min: null,
+      paused_at: null, pause_sec: 0, extra: (old && old.extra) || {}
     };
     if (isRunning(old) && !stopNow) {
-      // Runde läuft weiter
+      rec.paused_at = old.paused_at; rec.pause_sec = old.pause_sec;
     } else if (isRunning(old) && stopNow) {
-      const now = new Date();
-      rec.ended_at = now.toISOString();
-      rec.duration_min = Math.max(1, Math.round((now - new Date(rec.started_at)) / 60000));
+      Object.assign(rec, finished(old, rec.started_at));
     } else {
       let d = dur;
       if (!d) { d = avgDuration(newSlot); rec.estimated = true; }
       else if (old && old.estimated && old.duration_min === d) rec.estimated = true;
       rec.ended_at = new Date(new Date(rec.started_at).getTime() + d * 60000).toISOString();
       rec.duration_min = d;
+      if (old && old.duration_min === d) rec.pause_sec = old.pause_sec || 0;
     }
     if (newSlot !== slot && old) deleteRec(day, slot, true);
     saveRec(rec);
@@ -688,30 +910,102 @@
     toast(old ? "Korrektur gespeichert" : ROUNDS[newSlot - 1].name + " eingetragen");
   }
 
+  // ---------- Termin bearbeiten ----------
+  function renderApRemind() {
+    const box = $("apRemind");
+    box.textContent = "";
+    for (const o of REMIND_OPTS) {
+      const b = button(o.label, "chip", () => {
+        apRemind = apRemind.includes(o.d) ? apRemind.filter((x) => x !== o.d) : [...apRemind, o.d].sort((a, b) => b - a);
+        renderApRemind();
+      });
+      b.setAttribute("aria-pressed", String(apRemind.includes(o.d)));
+      box.append(b);
+    }
+  }
+  function applyTypeDefaults(typeId, keepName) {
+    const t = careType(typeId);
+    $("apTypeHint").textContent = t.hint;
+    if (!keepName) $("apName").value = "";
+    $("apName").placeholder = t.id === "custom" ? "z. B. Hundefriseur" : t.name + " (optional genauer, z. B. Mittel)";
+    $("apEvery").value = t.every || 1;
+    $("apUnit").value = t.unit;
+    $("apEvery").disabled = t.unit === "0";
+    apRemind = (t.remind || [7, 3, 1]).slice();
+    renderApRemind();
+  }
+  function openApSheet(ap) {
+    apEditing = ap ? ap.id : "new";
+    apDeleteArmed = false;
+    const sel = $("apType");
+    if (!sel.options.length) for (const t of CARE_TYPES) sel.append(h("option", { value: t.id }, t.icon + " " + t.name));
+    $("apTitle").textContent = ap ? "Termin bearbeiten" : "Neuer Termin";
+    if (ap) {
+      const d = ap.data;
+      sel.value = careType(d.type).id;
+      $("apTypeHint").textContent = careType(d.type).hint;
+      $("apName").value = d.name || "";
+      $("apDate").value = d.due;
+      $("apTime").value = d.time || "";
+      $("apEvery").value = d.every || 1;
+      $("apUnit").value = d.unit || "0";
+      $("apEvery").disabled = (d.unit || "0") === "0";
+      $("apNote").value = d.note || "";
+      apRemind = (d.remind || []).slice();
+      renderApRemind();
+      $("apLast").textContent = d.lastDone ? "Zuletzt erledigt am " + fmtDay(d.lastDone) + (d.history && d.history.length > 1 ? " (" + d.history.length + "× insgesamt)" : "") : "";
+    } else {
+      sel.value = "tick";
+      applyTypeDefaults("tick");
+      $("apDate").value = calToday();
+      $("apTime").value = "";
+      $("apNote").value = "";
+      $("apLast").textContent = "";
+    }
+    $("apDelete").hidden = !ap;
+    $("apDelete").textContent = "Löschen";
+    $("apIcs").hidden = !ap;
+    $("apSheet").hidden = false;
+    $("sheetBg").hidden = false;
+  }
+  function submitApSheet() {
+    const old = apEditing !== "new" ? items[apEditing] : null;
+    const type = $("apType").value;
+    const unit = $("apUnit").value;
+    const data = {
+      ...(old ? old.data : { lastDone: null, history: [] }),
+      type, name: $("apName").value.trim(), due: $("apDate").value || calToday(), time: $("apTime").value || "",
+      every: unit === "0" ? 0 : Math.max(1, parseInt($("apEvery").value, 10) || 1), unit,
+      remind: apRemind.slice(), note: $("apNote").value.trim(), archived: false
+    };
+    const item = old ? { ...old, data } : { id: uid(), kind: "appointment", data };
+    saveItem(item);
+    closeSheet();
+    toast(old ? "Termin gespeichert" : apTitle(item) + " angelegt");
+  }
+
   // ---------- Ereignisse ----------
   function setView(v, keepDay) {
     view = v;
-    for (const name of ["today", "add", "history", "stats", "settings"]) $("view-" + name).hidden = name !== v;
+    for (const name of ["today", "history", "stats", "care", "settings"]) $("view-" + name).hidden = name !== v;
     document.querySelectorAll(".tab").forEach((t) => {
       if (t.dataset.view === v) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
     });
-    if (!keepDay) viewDay = v === "add" ? addDays(todayStr(), -1) : todayStr();
+    if (!keepDay) viewDay = todayStr();
     render();
     window.scrollTo(0, 0);
   }
 
   function bind() {
     document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => setView(t.dataset.view)));
-    $("prevDay").onclick = () => {
-      viewDay = addDays(viewDay, -1);
-      if (view !== "today" && view !== "add") setView("today", true); else render();
-    };
-    $("nextDay").onclick = () => { if (viewDay < todayStr()) { viewDay = addDays(viewDay, 1); render(); } };
-    $("addDate").addEventListener("change", (e) => {
+    $("prevDay").onclick = () => { viewDay = addDays(viewDay, -1); if (view !== "today") setView("today", true); else render(); };
+    $("nextDay").onclick = () => { if (viewDay < todayStr()) { viewDay = addDays(viewDay, 1); if (view !== "today") setView("today", true); else render(); } };
+    $("pickDay").addEventListener("change", (e) => {
       const v = e.target.value;
-      if (v && v <= todayStr()) { viewDay = v; render(); }
+      if (v && v <= todayStr()) { viewDay = v; setView("today", true); }
     });
     $("sheetClose").onclick = closeSheet;
+    $("apClose").onclick = closeSheet;
     $("sheetBg").onclick = closeSheet;
     $("sheet").addEventListener("submit", (e) => { e.preventDefault(); submitSheet(false); });
     $("fStop").onclick = () => submitSheet(true);
@@ -724,16 +1018,29 @@
       closeSheet();
       toast("Runde gelöscht");
     };
+    $("addCare").onclick = () => openApSheet(null);
+    $("apType").addEventListener("change", (e) => applyTypeDefaults(e.target.value));
+    $("apUnit").addEventListener("change", (e) => { $("apEvery").disabled = e.target.value === "0"; });
+    $("apSheet").addEventListener("submit", (e) => { e.preventDefault(); submitApSheet(); });
+    $("apDelete").onclick = () => {
+      if (!apEditing || apEditing === "new") return;
+      if (!apDeleteArmed) { apDeleteArmed = true; $("apDelete").textContent = "Wirklich löschen?"; return; }
+      deleteItem(apEditing);
+      closeSheet();
+      toast("Termin gelöscht");
+    };
+    $("apIcs").onclick = () => { if (apEditing && items[apEditing]) exportIcs(items[apEditing]); };
     $("syncNow").onclick = () => pull();
     $("logout").onclick = async () => { if (sb) await sb.auth.signOut(); };
-    $("clearDemo").onclick = () => { walks = {}; persist(); render(); };
+    $("clearDemo").onclick = () => { walks = {}; items = {}; persist(); render(); };
+    $("reloadApp").onclick = () => location.reload();
     $("loginForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       $("loginError").textContent = "";
       const { error } = await sb.auth.signInWithPassword({ email: $("loginEmail").value.trim(), password: $("loginPw").value });
       if (error) $("loginError").textContent = "Anmeldung hat nicht geklappt. Bitte E-Mail und Passwort prüfen.";
     });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && editing) closeSheet(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
     window.addEventListener("online", () => { render(); pull(); });
     window.addEventListener("offline", render);
     document.addEventListener("visibilitychange", () => {
@@ -745,7 +1052,9 @@
       schedulePull();
     });
     setInterval(() => {
-      document.querySelectorAll("[data-since]").forEach((el) => { el.textContent = elapsed(el.dataset.since); });
+      document.querySelectorAll("[data-run]").forEach((el) => {
+        el.textContent = clock(activeSec({ started_at: el.dataset.start, pause_sec: Number(el.dataset.pause), paused_at: el.dataset.paused || null }));
+      });
     }, 1000);
     setInterval(() => { if (document.visibilityState === "visible") pull(); }, 60000);
   }

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Rüdigers Runden</title>
-<meta name="theme-color" content="#1d2b24">
+<meta name="theme-color" content="#1b2a24">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -23,10 +23,11 @@
   <header class="panel">
     <div class="daynav">
       <button class="iconbtn" id="prevDay" aria-label="Vorheriger Tag">‹</button>
-      <div class="daylabel">
+      <label class="daylabel" for="pickDay">
         <span class="eyebrow" id="dayEyebrow">Heute</span>
         <span class="daydate" id="dayDate"></span>
-      </div>
+        <input id="pickDay" type="date" aria-label="Tag auswählen">
+      </label>
       <button class="iconbtn" id="nextDay" aria-label="Nächster Tag">›</button>
     </div>
     <div class="scorewrap">
@@ -42,15 +43,8 @@
 
   <main>
     <section id="view-today" class="view">
+      <div id="reminders" class="reminders"></div>
       <ol class="rounds" id="rounds"></ol>
-    </section>
-
-    <section id="view-add" class="view" hidden>
-      <h2>Nachtragen und korrigieren</h2>
-      <label for="addDate">Tag</label>
-      <input id="addDate" type="date">
-      <div class="chips datechips" id="dateChips"></div>
-      <ol class="rounds addrounds" id="addRounds"></ol>
     </section>
 
     <section id="view-history" class="view" hidden>
@@ -80,6 +74,17 @@
       </div>
     </section>
 
+    <section id="view-care" class="view" hidden>
+      <div class="carehead">
+        <h2>Rüdigers Termine</h2>
+        <button type="button" class="btn small primary" id="addCare">+ Termin</button>
+      </div>
+      <ol class="carelist" id="careList"></ol>
+      <div id="careEmpty" class="empty" hidden>
+        <p>Noch keine Termine. Leg zum Beispiel Zeckenschutz, Wurmkur, Impfungen oder die Allergietabletten an.</p>
+      </div>
+    </section>
+
     <section id="view-settings" class="view" hidden>
       <div class="block">
         <h2>Auf diesem Handy bin ich</h2>
@@ -103,14 +108,19 @@
         <h2>So zählt die App</h2>
         <p class="legend" id="rulesInfo"></p>
       </div>
+      <div class="block">
+        <h2>Version</h2>
+        <p class="legend" id="versionInfo"></p>
+        <button class="btn ghost" id="reloadApp">App neu laden</button>
+      </div>
     </section>
   </main>
 
   <nav class="tabbar" aria-label="Bereiche">
     <button class="tab" data-view="today" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><span>Heute</span></button>
-    <button class="tab" data-view="add"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Nachtragen</span></button>
     <button class="tab" data-view="history"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span>Verlauf</span></button>
     <button class="tab" data-view="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V5M19 20v-6"/></svg><span>Statistik</span></button>
+    <button class="tab" data-view="care"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.6-7 10-7 10z"/></svg><span>Termine</span><b class="tabbadge" id="careBadge" hidden></b></button>
     <button class="tab" data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span>Optionen</span></button>
   </nav>
 </div>
@@ -169,13 +179,78 @@
     <button type="submit" class="btn primary">Speichern</button>
   </div>
 </form>
+<form id="apSheet" class="sheet" hidden>
+  <div class="sheethead">
+    <h2 id="apTitle">Termin</h2>
+    <button type="button" class="iconbtn dark" id="apClose" aria-label="Schließen">×</button>
+  </div>
+  <label for="apType">Art</label>
+  <select id="apType"></select>
+  <p class="legend" id="apTypeHint"></p>
+  <label for="apName">Bezeichnung</label>
+  <input id="apName" type="text" maxlength="60" placeholder="z. B. Bravecto, Tierarzt Dr. Müller">
+  <div class="two">
+    <div>
+      <label for="apDate">Nächster Termin</label>
+      <input id="apDate" type="date" required>
+    </div>
+    <div>
+      <label for="apTime">Uhrzeit <span class="labelnote">optional</span></label>
+      <input id="apTime" type="time">
+    </div>
+  </div>
+  <label>Wiederholen</label>
+  <div class="repeat">
+    <span>alle</span>
+    <input id="apEvery" type="number" inputmode="numeric" min="1" max="99" aria-label="Abstand">
+    <select id="apUnit" aria-label="Einheit">
+      <option value="d">Tage</option>
+      <option value="w">Wochen</option>
+      <option value="m">Monate</option>
+      <option value="y">Jahre</option>
+      <option value="0">nicht wiederholen</option>
+    </select>
+  </div>
+  <label>Erinnern</label>
+  <div class="chips" id="apRemind"></div>
+  <label for="apNote">Notiz</label>
+  <input id="apNote" type="text" maxlength="200" placeholder="z. B. Dosis, Packung, Tierarzt">
+  <p class="legend" id="apLast"></p>
+  <div class="sheetactions">
+    <button type="button" class="btn ghost danger" id="apDelete">Löschen</button>
+    <button type="button" class="btn ghost" id="apIcs">In Kalender</button>
+    <button type="submit" class="btn primary">Speichern</button>
+  </div>
+</form>
+<div id="updateBar" class="updatebar" hidden>
+  <span>Neue Version verfügbar</span>
+  <button type="button" class="btn small primary" id="updateNow">Aktualisieren</button>
+</div>
 <!--/APP-->
 <script src="config.js"></script>
 <script src="lib/supabase.js"></script>
 <script src="app.js"></script>
 <script>
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").then((reg) => {
+        const show = () => { const b = document.getElementById("updateBar"); if (b) b.hidden = false; };
+        if (reg.waiting && navigator.serviceWorker.controller) show();
+        reg.addEventListener("updatefound", () => {
+          const nw = reg.installing;
+          if (nw) nw.addEventListener("statechange", () => { if (nw.state === "installed" && navigator.serviceWorker.controller) show(); });
+        });
+        document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update().catch(() => {}); });
+        document.getElementById("updateNow").onclick = () => {
+          if (reg.waiting) reg.waiting.postMessage("skipWaiting"); else location.reload();
+        };
+      }).catch(() => {});
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (hadController && !reloaded) { reloaded = true; location.reload(); }
+      });
+    });
   }
 </script>
 </body>
