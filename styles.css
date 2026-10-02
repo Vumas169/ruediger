@@ -298,3 +298,9 @@ main { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 110px); }
 .error.inline { color: var(--danger); margin: 10px 0 0; }
 button.bar { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
 input[type="date"] { width: 100%; min-height: 46px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font-size: 16px; }
+
+.iconchip.poo { position: relative; }
+.iconchip .count { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 99px; background: var(--tan); color: #fff; font: 700 12px/20px var(--font-body); }
+.poocount { display: flex; align-items: center; gap: 14px; }
+.poocount span { min-width: 90px; text-align: center; font-size: 22px; }
+.poocount .iconbtn:disabled { opacity: .35; }

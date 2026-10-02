@@ -43,7 +43,6 @@
   <main>
     <section id="view-today" class="view">
       <ol class="rounds" id="rounds"></ol>
-      <p class="hint" id="todayHint"></p>
     </section>
 
     <section id="view-add" class="view" hidden>
@@ -52,7 +51,6 @@
       <input id="addDate" type="date">
       <div class="chips datechips" id="dateChips"></div>
       <ol class="rounds addrounds" id="addRounds"></ol>
-      <p class="hint" id="addHint"></p>
     </section>
 
     <section id="view-history" class="view" hidden>
@@ -86,7 +84,7 @@
       <div class="block">
         <h2>Auf diesem Handy bin ich</h2>
         <div class="chips" id="meChips"></div>
-        <p class="legend">Neue Runden werden automatisch dieser Person zugeordnet.</p>
+        <p class="legend">Wird beim Anmelden automatisch gesetzt und an deinem Konto gespeichert. Neue Runden laufen auf diese Person.</p>
       </div>
       <div class="block">
         <h2>Abgleich</h2>
@@ -156,7 +154,11 @@
   <p class="legend" id="durHint"></p>
   <label>Häufchen</label>
   <div class="chips">
-    <button type="button" class="chip" id="fPoo" aria-pressed="false">💩 Hat Rüdiger gemacht</button>
+    <div class="poocount">
+      <button type="button" class="iconbtn dark" id="pooMinus" aria-label="Ein Häufchen weniger">−</button>
+      <span id="pooVal" aria-live="polite">keins</span>
+      <button type="button" class="iconbtn dark" id="pooPlus" aria-label="Ein Häufchen mehr">+</button>
+    </div>
   </div>
   <label for="fNote">Notiz</label>
   <input id="fNote" type="text" maxlength="200" placeholder="z. B. Hundewiese, Regen">

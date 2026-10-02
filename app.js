@@ -33,7 +33,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* egal */ } }
   };
-  const P = DEMO ? "rr.demo3." : "rr.";
+  const P = DEMO ? "rr.demo4." : "rr.";
   let walks = ls.get(P + "walks", {});      // "YYYY-MM-DD|slot" -> Runde
   let pending = ls.get(P + "pending", []);  // noch nicht abgeglichene Änderungen
   let lastSync = ls.get(P + "lastSync", null);
@@ -47,7 +47,7 @@
   let lastToday = todayStr();
   let viewDay = lastToday;
   let editing = null;   // { day, slot, newSlot }
-  let sheetWalkers = [me], sheetPoo = false, deleteArmed = false;
+  let sheetWalkers = [me], sheetPoo = 0, deleteArmed = false;
 
   const $ = (id) => document.getElementById(id);
   const key = (day, slot) => day + "|" + slot;
@@ -59,6 +59,7 @@
     if (!r) return r;
     if (!Array.isArray(r.walkers)) r.walkers = r.walker ? [r.walker] : [];
     delete r.walker;
+    r.poo = Number(r.poo) || 0;   // früher ja/nein, jetzt Anzahl
     return r;
   }
   const isTogether = (r) => r.walkers.length > 1;
@@ -151,7 +152,7 @@
       day: r.day, slot: r.slot, walkers: r.walkers || [],
       started_at: r.started_at || null, ended_at: r.ended_at || null,
       duration_min: r.duration_min == null ? null : r.duration_min,
-      estimated: !!r.estimated, poo: !!r.poo, note: r.note || null, updated_at: r.updated_at
+      estimated: !!r.estimated, poo: Number(r.poo) || 0, note: r.note || null, updated_at: r.updated_at
     };
   }
   async function flush() {
@@ -209,13 +210,31 @@
     });
     try { const { data } = await sb.auth.getSession(); session = data.session; } catch { session = null; }
     showLogin(!session);
-    sb.auth.onAuthStateChange((_evt, s) => { session = s; showLogin(!s); if (s) schedulePull(); render(); });
+    applyLoginWalker();
+    sb.auth.onAuthStateChange((_evt, s) => { session = s; showLogin(!s); if (s) { applyLoginWalker(); schedulePull(); } render(); });
     sb.channel("walks-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "walks" }, () => schedulePull())
       .subscribe();
     if (session) schedulePull();
   }
   function showLogin(show) { $("login").hidden = !show; }
+
+  // Wer bin ich? Gespeichert am Konto, sonst aus der E-Mail-Adresse erraten (z. B. kim.xyz@... = Kim).
+  function applyLoginWalker() {
+    if (!session || !session.user) return;
+    const saved = session.user.user_metadata && session.user.user_metadata.walker;
+    let w = CFG.WALKERS.includes(saved) ? saved : null;
+    if (!w) {
+      const mail = (session.user.email || "").toLowerCase();
+      w = CFG.WALKERS.find((n) => mail.includes(n.toLowerCase())) || null;
+      if (w) saveWalkerToAccount(w);
+    }
+    if (w && w !== me) { me = w; ls.set("rr.me", w); render(); }
+  }
+  function saveWalkerToAccount(w) {
+    if (!sb || !session) return;
+    sb.auth.updateUser({ data: { walker: w } }).catch(() => {});
+  }
 
   // ---------- Beispieldaten im Testmodus ----------
   function seedDemo() {
@@ -237,7 +256,7 @@
         walks[key(day, slot)] = {
           day, slot, walkers,
           started_at: s.toISOString(), ended_at: new Date(s.getTime() + dur * 60000).toISOString(),
-          duration_min: dur, estimated: false, poo: rnd() < 0.45, note: "", updated_at: s.toISOString()
+          duration_min: dur, estimated: false, poo: rnd() < 0.45 ? (rnd() < 0.25 ? 2 : 1) : 0, note: "", updated_at: s.toISOString()
         };
       });
     }
@@ -248,7 +267,7 @@
   // ---------- Aktionen ----------
   function startWalk(slot) {
     saveRec({ day: todayStr(), slot, walkers: [me], started_at: new Date().toISOString(), ended_at: null,
-      duration_min: null, estimated: false, poo: false, note: "" });
+      duration_min: null, estimated: false, poo: 0, note: "" });
   }
   function stopWalk(rec) {
     const now = new Date();
@@ -268,10 +287,10 @@
     if (start > now) start = new Date(now.getTime() - dur * 60000);
     saveRec({ day, slot, walkers: [me], started_at: start.toISOString(),
       ended_at: new Date(start.getTime() + dur * 60000).toISOString(),
-      duration_min: dur, estimated: true, poo: false, note: "" });
+      duration_min: dur, estimated: true, poo: 0, note: "" });
     toast(ROUNDS[slot - 1].name + " eingetragen: " + hm(start.toISOString()) + " Uhr, " + dur + " min. Antippen zum Ändern.");
   }
-  function togglePoo(rec) { saveRec({ ...rec, poo: !rec.poo }); }
+  function addPoo(rec) { saveRec({ ...rec, poo: (rec.poo || 0) + 1 }); }
   // Zu zweit an/aus. Die Person, die die Runde angelegt hat, bleibt vorne.
   function toggleTogether(rec) {
     const first = rec.walkers[0] || me;
@@ -344,8 +363,9 @@
       if (isRunning(rec)) {
         act.append(together, button("Stopp", "btn small run", () => stopWalk(rec)));
       } else if (isDone(rec)) {
-        act.append(together, toggleBtn("💩", "iconchip poo", !!rec.poo,
-          rec.poo ? "Häufchen erledigt, antippen zum Entfernen" : "Häufchen eintragen", () => togglePoo(rec)));
+        const p = toggleBtn("💩", "iconchip poo", rec.poo > 0, "Häufchen dazuzählen, bisher " + rec.poo, () => addPoo(rec));
+        if (rec.poo > 1) p.append(h("span", { class: "count" }, String(rec.poo)));
+        act.append(together, p);
       } else if (live) {
         const s = button("▶", "btn small play", () => startWalk(slot));
         s.setAttribute("aria-label", "Runde starten (Zeit messen)");
@@ -402,9 +422,7 @@
   function renderToday() {
     const isToday = viewDay === todayStr();
     renderRoundList($("rounds"), viewDay, isToday);
-    $("todayHint").textContent = isToday
-      ? "▶ startet die Zeitmessung, Stopp beendet sie. Erledigt trägt die Runde mit ihrer Durchschnittsdauer ein. 👥 = zusammen gegangen, 💩 = Häufchen. Runde antippen zum Korrigieren."
-      : "Vergangener Tag. Ø trägt die Runde mit ihrer Durchschnittsdauer ein, Genau mit eigener Uhrzeit und Dauer. Runde antippen zum Korrigieren.";
+
   }
 
   function renderAdd() {
@@ -420,7 +438,6 @@
       chips.append(b);
     });
     renderRoundList($("addRounds"), viewDay, false);
-    $("addHint").textContent = "Ø trägt die Runde mit der Durchschnittsdauer dieser Runde ein. Genau öffnet das Formular für Uhrzeit, Dauer und wer dabei war. Eingetragene Runden antippen zum Korrigieren oder Löschen.";
   }
 
   function renderHistory() {
@@ -494,11 +511,11 @@
     for (const r of Object.values(walks)) {
       if (!isDone(r) || r.day > t || (from && r.day < from)) continue;
       const m = minutesOf(r);
-      total.rounds++; total.mins += m; if (r.poo) total.poo++; if (isTogether(r)) total.together++;
+      total.rounds++; total.mins += m; total.poo += r.poo || 0; if (isTogether(r)) total.together++;
       if (!first || r.day < first) first = r.day;
       for (const w of r.walkers) {
         if (!(w in by)) continue;
-        by[w].rounds++; by[w].mins += m; if (r.poo) by[w].poo++; if (isTogether(r)) by[w].together++;
+        by[w].rounds++; by[w].mins += m; by[w].poo += r.poo || 0; if (isTogether(r)) by[w].together++;
       }
     }
     return { by, total, first };
@@ -561,7 +578,7 @@
     const chips = $("meChips");
     chips.textContent = "";
     for (const w of CFG.WALKERS) {
-      const b = button(w, "chip", () => { me = w; ls.set("rr.me", w); renderSettings(); });
+      const b = button(w, "chip", () => { me = w; ls.set("rr.me", w); saveWalkerToAccount(w); renderSettings(); });
       b.setAttribute("aria-pressed", String(w === me));
       chips.append(b);
     }
@@ -607,7 +624,8 @@
       b.setAttribute("aria-pressed", String(sheetWalkers.includes(w)));
       wc.append(b);
     }
-    $("fPoo").setAttribute("aria-pressed", String(sheetPoo));
+    $("pooVal").textContent = sheetPoo ? "💩".repeat(Math.min(sheetPoo, 5)) + (sheetPoo > 5 ? " " + sheetPoo : "") : "keins";
+    $("pooMinus").disabled = sheetPoo === 0;
     $("fDur").placeholder = "Ø " + avgDuration(editing.newSlot);
     $("durHint").textContent = isRunning(walks[key(editing.day, editing.slot)])
       ? "Die Runde läuft noch. Jetzt beenden stoppt die Zeit."
@@ -617,7 +635,7 @@
     const rec = walks[key(day, slot)];
     editing = { day, slot, newSlot: slot };
     sheetWalkers = rec && rec.walkers.length ? rec.walkers.slice() : [me];
-    sheetPoo = !!(rec && rec.poo);
+    sheetPoo = (rec && rec.poo) || 0;
     deleteArmed = false;
     $("sheetTitle").textContent = rec ? "Runde korrigieren" : "Runde eintragen";
     $("sheetSub").textContent = fmtDate(day);
@@ -697,7 +715,8 @@
     $("sheetBg").onclick = closeSheet;
     $("sheet").addEventListener("submit", (e) => { e.preventDefault(); submitSheet(false); });
     $("fStop").onclick = () => submitSheet(true);
-    $("fPoo").onclick = () => { sheetPoo = !sheetPoo; renderSheetChips(); };
+    $("pooPlus").onclick = () => { sheetPoo++; renderSheetChips(); };
+    $("pooMinus").onclick = () => { if (sheetPoo > 0) sheetPoo--; renderSheetChips(); };
     $("fDelete").onclick = () => {
       if (!editing) return;
       if (!deleteArmed) { deleteArmed = true; $("fDelete").textContent = "Wirklich löschen?"; return; }

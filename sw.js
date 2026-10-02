@@ -1,6 +1,6 @@
 // Service Worker: hält die App offline verfügbar.
 // Bei Änderungen an den Dateien die Versionsnummer erhöhen.
-const CACHE = "ruediger-v5";
+const CACHE = "ruediger-v6";
 const SHELL = [
   "./",
   "./index.html",
