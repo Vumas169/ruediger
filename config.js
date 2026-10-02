@@ -6,8 +6,8 @@ window.GASSI_CONFIG = {
   // Schlüssel unter Project Settings > API Keys: "Publishable key" (beginnt mit sb_publishable_)
   // oder der alte "anon public" Key. Niemals den Secret- bzw. service_role-Key eintragen.
   // Leer lassen = Testmodus, Daten bleiben nur auf dem jeweiligen Handy.
-  SUPABASE_URL: "",
-  SUPABASE_ANON_KEY: "",
+  SUPABASE_URL: "https://tuaffkmvurmjiirloupj.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_wWEiKC6nRNQTVTADTnnWEw_yzEERHTU",
 
   // Wer mit Rüdiger geht
   WALKERS: ["Christopher", "Kim"],
