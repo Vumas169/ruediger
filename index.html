@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rüdigers Runden</title>
+<meta name="theme-color" content="#1d2b24">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Rüdiger">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<!--APP-->
+<div id="app">
+  <header class="panel">
+    <div class="daynav">
+      <button class="iconbtn" id="prevDay" aria-label="Vorheriger Tag">‹</button>
+      <div class="daylabel">
+        <span class="eyebrow" id="dayEyebrow">Heute</span>
+        <span class="daydate" id="dayDate"></span>
+      </div>
+      <button class="iconbtn" id="nextDay" aria-label="Nächster Tag">›</button>
+    </div>
+    <div class="scorewrap">
+      <svg class="ring" id="ring" viewBox="0 0 120 120" aria-hidden="true"></svg>
+      <div class="scoretext">
+        <span class="points" id="points">0</span>
+        <span class="pointsof" id="pointsOf">Minuten draußen</span>
+        <span class="pointsof" id="roundsOf"></span>
+      </div>
+    </div>
+    <p class="status" id="status" role="status"></p>
+  </header>
+
+  <main>
+    <section id="view-today" class="view">
+      <ol class="rounds" id="rounds"></ol>
+      <p class="hint" id="todayHint"></p>
+    </section>
+
+    <section id="view-add" class="view" hidden>
+      <h2>Nachtragen und korrigieren</h2>
+      <label for="addDate">Tag</label>
+      <input id="addDate" type="date">
+      <div class="chips datechips" id="dateChips"></div>
+      <ol class="rounds addrounds" id="addRounds"></ol>
+      <p class="hint" id="addHint"></p>
+    </section>
+
+    <section id="view-history" class="view" hidden>
+      <div class="block">
+        <h2>Minuten draußen <span class="sub">letzte 7 Tage</span></h2>
+        <div class="bars" id="bars"></div>
+        <div class="keys" id="barsKeys"></div>
+      </div>
+      <div class="block">
+        <h2>Runden pro Tag <span class="sub">letzte 4 Wochen</span></h2>
+        <div class="grid4" id="grid4"></div>
+        <p class="legend">Je kräftiger die Farbe, desto mehr Runden. Tippen auf einen Tag öffnet ihn.</p>
+      </div>
+    </section>
+
+    <section id="view-stats" class="view" hidden>
+      <div class="seg" id="periodSeg" role="tablist" aria-label="Zeitraum"></div>
+      <div class="block" id="whoBlock"></div>
+      <div class="block">
+        <h2>Runden im Vergleich</h2>
+        <div class="tablewrap"><table class="stattable" id="statTable"></table></div>
+      </div>
+      <div class="block">
+        <h2>Ø Dauer je Runde <span class="sub">letzte 30 Tage</span></h2>
+        <div id="avgList"></div>
+        <p class="legend">Diese Werte nimmt "Erledigt", wenn eine Runde nachgetragen wird.</p>
+      </div>
+    </section>
+
+    <section id="view-settings" class="view" hidden>
+      <div class="block">
+        <h2>Auf diesem Handy bin ich</h2>
+        <div class="chips" id="meChips"></div>
+        <p class="legend">Neue Runden werden automatisch dieser Person zugeordnet.</p>
+      </div>
+      <div class="block">
+        <h2>Abgleich</h2>
+        <p id="syncInfo" class="legend"></p>
+        <div class="row">
+          <button class="btn ghost" id="syncNow">Jetzt abgleichen</button>
+          <button class="btn ghost" id="logout" hidden>Abmelden</button>
+        </div>
+      </div>
+      <div class="block" id="demoBlock" hidden>
+        <h2>Testmodus</h2>
+        <p class="legend">Die App läuft ohne Datenbank. Alles bleibt auf diesem Gerät.</p>
+        <button class="btn ghost" id="clearDemo">Beispieldaten löschen</button>
+      </div>
+      <div class="block">
+        <h2>So zählt die App</h2>
+        <p class="legend" id="rulesInfo"></p>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar" aria-label="Bereiche">
+    <button class="tab" data-view="today" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><span>Heute</span></button>
+    <button class="tab" data-view="add"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Nachtragen</span></button>
+    <button class="tab" data-view="history"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span>Verlauf</span></button>
+    <button class="tab" data-view="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V5M19 20v-6"/></svg><span>Statistik</span></button>
+    <button class="tab" data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span>Optionen</span></button>
+  </nav>
+</div>
+
+<div id="login" class="login" hidden>
+  <form id="loginForm" class="loginbox">
+    <img src="icons/icon-192.png" alt="" width="72" height="72">
+    <h1>Rüdigers Runden</h1>
+    <p class="legend">Einmal anmelden, danach bleibt die App angemeldet.</p>
+    <label for="loginEmail">E-Mail</label>
+    <input id="loginEmail" type="email" autocomplete="username" required>
+    <label for="loginPw">Passwort</label>
+    <input id="loginPw" type="password" autocomplete="current-password" required>
+    <button class="btn primary" type="submit">Anmelden</button>
+    <p class="error" id="loginError" role="alert"></p>
+  </form>
+</div>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<div id="sheetBg" class="sheetbg" hidden></div>
+<form id="sheet" class="sheet" hidden>
+  <div class="sheethead">
+    <h2 id="sheetTitle">Runde</h2>
+    <button type="button" class="iconbtn dark" id="sheetClose" aria-label="Schließen">×</button>
+  </div>
+  <p class="legend" id="sheetSub"></p>
+  <label>Runde</label>
+  <div class="chips" id="slotChips"></div>
+  <label>Wer war dabei? <span class="labelnote">Mehrere antippen = zusammen gegangen</span></label>
+  <div class="chips" id="walkerChips"></div>
+  <div class="two">
+    <div>
+      <label for="fTime">Beginn</label>
+      <input id="fTime" type="time" required>
+    </div>
+    <div>
+      <label for="fDur">Dauer (Minuten)</label>
+      <input id="fDur" type="number" inputmode="numeric" min="1" max="300">
+    </div>
+  </div>
+  <p class="legend" id="durHint"></p>
+  <label>Häufchen</label>
+  <div class="chips">
+    <button type="button" class="chip" id="fPoo" aria-pressed="false">💩 Hat Rüdiger gemacht</button>
+  </div>
+  <label for="fNote">Notiz</label>
+  <input id="fNote" type="text" maxlength="200" placeholder="z. B. Hundewiese, Regen">
+  <p class="error inline" id="sheetError" role="alert"></p>
+  <div class="sheetactions">
+    <button type="button" class="btn ghost danger" id="fDelete">Löschen</button>
+    <button type="button" class="btn ghost" id="fStop" hidden>Jetzt beenden</button>
+    <button type="submit" class="btn primary">Speichern</button>
+  </div>
+</form>
+<!--/APP-->
+<script src="config.js"></script>
+<script src="lib/supabase.js"></script>
+<script src="app.js"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  }
+</script>
+</body>
+</html>
