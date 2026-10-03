@@ -9,6 +9,11 @@
   "orientation": "portrait",
   "background_color": "#1b2a24",
   "theme_color": "#1b2a24",
+  "shortcuts": [
+    { "name": "Neuer Termin", "short_name": "Termin", "url": "./#new-event", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Kalender", "url": "./#cal", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Heute", "url": "./#today", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ],
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },

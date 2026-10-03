@@ -1,7 +1,8 @@
 // Rüdigers Runden: Server-Funktion für Push-Benachrichtigungen (Supabase Edge Function "reminders").
 // Wird alle 15 Minuten per Cron aufgerufen und schickt fällige Termin-Erinnerungen an alle angemeldeten Handys.
 // Aktionen (POST-Body): {action:"run"} Erinnerungen prüfen, {action:"key"} öffentlichen Schlüssel holen,
-// {action:"test", endpoint} Testnachricht an ein Handy.
+// {action:"test", endpoint} Testnachricht an ein Handy, {action:"notify", id, by} neuer Termin an die anderen.
+// "test" und "notify" erfordern eine Anmeldung in der App.
 import webpush from "npm:web-push@3.6.7";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -96,13 +97,25 @@ function occurrences(ev: Record<string, any>, from: string, to: string): string[
   const freq = ev.repeat && ev.repeat.freq && ev.repeat.freq !== "0" ? ev.repeat.freq : null;
   const until = freq && ev.repeat.until ? ev.repeat.until : null;
   const ex = new Set(ev.exdates || []);
+  const pause = freq && ev.pause && ev.pause.from && ev.pause.to ? ev.pause : null;
   for (let n = 0; n < 4000; n++) {
     const cur = freq ? stepRepeat(base, freq, n) : base;
     if (cur > to || (until && cur > until)) break;
-    if (cur >= from && !ex.has(cur)) out.push(cur);
+    const paused = pause && cur >= pause.from && cur <= pause.to;
+    if (cur >= from && !ex.has(cur) && !paused) out.push(cur);
     if (!freq) break;
   }
   return out;
+}
+// Text für "X Minuten vorher", passend für beliebige eigene Werte
+function relText(off: number, allDay: boolean): string {
+  if (off === 0) return allDay ? "Heute" : "Jetzt";
+  if (off === 1440) return "Morgen";
+  if (off === 10080) return "In einer Woche";
+  if (off % 1440 === 0) return `In ${off / 1440} Tagen`;
+  if (off % 60 === 0) return off === 60 ? "In 1 Stunde" : `In ${off / 60} Stunden`;
+  if (off > 60) return `In ${Math.floor(off / 60)} Std. ${off % 60} Min.`;
+  return `In ${off} Minuten`;
 }
 const forWho = (subs: Sub[], who: string[] | undefined) =>
   !who || !who.length ? subs : subs.filter((s) => !s.walker || who.includes(s.walker));
@@ -149,7 +162,8 @@ async function runReminders() {
   for (const row of evs || []) {
     const ev = row.data || {};
     if (!ev.start || !(ev.remind || []).length) continue;
-    for (const day of occurrences(ev, addDays(today, -2), addDays(today, 9))) {
+    const maxOff = Math.max(...(ev.remind as number[]));
+    for (const day of occurrences(ev, addDays(today, -2), addDays(today, Math.ceil(maxOff / 1440) + 2))) {
       const startL = ev.allDay ? `${day}T08:00` : `${day}T${String(ev.start).slice(11, 16)}`;
       for (const off of ev.remind as number[]) {
         const moment = shiftLocal(startL, -off);
@@ -157,8 +171,7 @@ async function runReminders() {
         const key = `ev|${row.id}|${day}|${off}`;
         const ins = await sb.from("push_log").upsert({ key }, { onConflict: "key", ignoreDuplicates: true }).select();
         if (ins.error || !ins.data || !ins.data.length) continue;
-        const rel = off === 0 ? (ev.allDay ? "Heute" : "Jetzt") : off < 60 ? `In ${off} Minuten` : off < 1440 ? `In ${off / 60} Stunde${off === 60 ? "" : "n"}`
-          : off === 1440 ? "Morgen" : off === 10080 ? "In einer Woche" : `In ${Math.round(off / 1440)} Tagen`;
+        const rel = relText(off, !!ev.allDay);
         const body = `${rel}: ${evWhen(ev, day)}` + (ev.location ? ` · ${ev.location}` : "");
         for (const s of forWho(subs as Sub[], ev.who)) {
           try { await send(s, { title: `📅 ${ev.title || "Termin"}`, body, tag: key, url: "./#cal" }, keys); sent++; } catch (_) { /* weiter */ }
@@ -177,6 +190,12 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = body.action || "run";
     if (action === "key") return json({ publicKey: (await getKeys()).public_key });
+    // Nachrichten an Handys nur für angemeldete Nutzer der App (Registrierung ist abgeschaltet)
+    if (action === "notify" || action === "test") {
+      const token = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+      const { data: u } = token ? await sb.auth.getUser(token) : { data: { user: null } };
+      if (!u || !u.user) return json({ ok: false, error: "Nicht angemeldet." }, 401);
+    }
     if (action === "notify") {
       // Neuer Termin: die anderen Beteiligten informieren
       const { data: row } = await sb.from("app_data").select("data").eq("id", body.id).eq("kind", "event").maybeSingle();

@@ -36,14 +36,6 @@
       </label>
       <button class="iconbtn" id="nextDay" aria-label="Nächster Tag">›</button>
     </div>
-    <div class="scorewrap">
-      <svg class="ring" id="ring" viewBox="0 0 120 120" aria-hidden="true"></svg>
-      <div class="scoretext">
-        <span class="points" id="points">0</span>
-        <span class="pointsof" id="pointsOf">Min.</span>
-      </div>
-    </div>
-    <p class="roundsof" id="roundsOf"></p>
     <p class="status" id="status" role="status"></p>
   </header>
 
@@ -52,6 +44,20 @@
       <div id="todayEvents" class="todayev"></div>
       <div id="reminders" class="reminders"></div>
       <ol class="rounds" id="rounds"></ol>
+      <details class="donebox" id="doneBox" hidden>
+        <summary id="doneSum"></summary>
+        <ol class="rounds" id="doneRounds"></ol>
+      </details>
+      <div class="daysum" id="daySum">
+        <div class="scorewrap">
+          <svg class="ring" id="ring" viewBox="0 0 120 120" aria-hidden="true"></svg>
+          <div class="scoretext">
+            <span class="points" id="points">0</span>
+            <span class="pointsof" id="pointsOf">Min.</span>
+          </div>
+        </div>
+        <p class="roundsof" id="roundsOf"></p>
+      </div>
     </section>
 
     <section id="view-cal" class="view" hidden>
@@ -117,6 +123,11 @@
           <button class="btn primary" id="pushToggle" hidden>Einschalten</button>
           <button class="btn ghost" id="pushTest" hidden>Test senden</button>
         </div>
+      </div>
+      <div class="block">
+        <h2>Kalender</h2>
+        <label for="holidaySel">Feiertage</label>
+        <select id="holidaySel"></select>
       </div>
       <div class="block" id="demoBlock" hidden>
         <h2>Testmodus</h2>
@@ -254,6 +265,8 @@
   <input id="evTitle" type="text" maxlength="80" required placeholder="z. B. Abendessen bei Schmidti">
   <label>Für wen?</label>
   <div class="chips" id="evWho"></div>
+  <label>Farbe</label>
+  <div class="swatches" id="evColors"></div>
   <div class="chips evallday">
     <button type="button" class="chip" id="evAllDay" aria-pressed="false">Ganztägig</button>
   </div>
@@ -284,8 +297,24 @@
     </div>
     <div id="evUntilWrap"><label for="evUntil">bis <span class="labelnote">optional</span></label><input id="evUntil" type="date"></div>
   </div>
+  <div id="evPauseWrap">
+    <label for="evPauseFrom">Pausieren <span class="labelnote">optional, z. B. Ferien</span></label>
+    <div class="two">
+      <div><input id="evPauseFrom" type="date" aria-label="Pause von"></div>
+      <div><input id="evPauseTo" type="date" aria-label="Pause bis"></div>
+    </div>
+  </div>
   <label>Erinnern</label>
   <div class="chips" id="evRemind"></div>
+  <div class="customremind">
+    <input id="evCustomNum" type="number" inputmode="numeric" min="1" max="999" placeholder="Eigene" aria-label="Eigene Erinnerung">
+    <select id="evCustomUnit" aria-label="Einheit">
+      <option value="1">Min. vorher</option>
+      <option value="60">Std. vorher</option>
+      <option value="1440" selected>Tage vorher</option>
+    </select>
+    <button type="button" class="btn small ghost" id="evCustomAdd">Hinzufügen</button>
+  </div>
   <label for="evNote">Notiz</label>
   <textarea id="evNote" rows="2" maxlength="500"></textarea>
   <p class="error inline" id="evError" role="alert"></p>

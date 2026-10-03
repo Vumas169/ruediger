@@ -110,11 +110,16 @@ Hinweise:
 - iPhone: nur in der App vom Home-Bildschirm, ab iOS 16.4.
 - Erinnerungen kommen zu den beim Termin eingestellten Zeitpunkten, bei Terminen ohne Uhrzeit um 8 Uhr. Für jeden gewählten Zeitpunkt (1 Woche, 3 Tage, 1 Tag vorher, am Tag) kommt eine eigene Benachrichtigung.
 - Ausschalten pro Handy unter Optionen.
+- Die Funktion verschickt Test- und "Neuer Termin"-Nachrichten nur für angemeldete Nutzer der App.
+
+## Abkürzungen auf dem Startbildschirm
+
+Echte Widgets sind für Web-Apps weder auf Android noch auf dem iPhone möglich. Auf Android zeigt langes Drücken auf das App-Symbol die Abkürzungen "Neuer Termin", "Kalender" und "Heute". Sie lassen sich auch als eigenes Symbol auf den Startbildschirm ziehen. Nach dem Update kann es nötig sein, die App einmal neu zum Startbildschirm hinzuzufügen, damit Android die Abkürzungen übernimmt.
 
 ## Reiter
 
-- Heute: die Runden des Tages und fällige Termine.
-- Kalender: gemeinsamer Kalender mit Monatsansicht, Terminen für eine Person oder beide, Ort, Wiederholung und Erinnerungen.
+- Heute: oben Termine und Fälliges, dann die offenen Runden. Erledigte Runden sind zusammengeklappt, die Tagesbilanz mit Kreis steht unten.
+- Kalender: gemeinsamer Kalender mit Monatsansicht (Wischen wechselt den Monat), Terminen für eine Person oder beide, eigenen Farben, Ort, Wiederholung mit Pause, frei wählbaren Erinnerungen, Feiertagen des gewählten Bundeslands und durchgehenden Balken für mehrtägige Termine.
 - Statistik: Zeit draußen, Runden, letzte 7 Tage, wer welche Runde geht, Rekorde, Runden pro Tag, Vergleich, Ø Dauer je Runde.
 - Rüdiger: Behandlungen wie Zeckenschutz, Wurmkur, Impfungen.
-- Optionen: wer auf diesem Handy unterwegs ist, Benachrichtigungen, "So funktioniert die App" mit allen Erklärungen, Konto und Version.
+- Optionen: wer auf diesem Handy unterwegs ist, Benachrichtigungen, Bundesland für Feiertage, "So funktioniert die App" mit allen Erklärungen, Konto und Version.

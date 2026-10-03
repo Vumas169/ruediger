@@ -4,7 +4,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "0.6 vom 03.10.2026";
+  const APP_VERSION = "0.7 vom 03.10.2026";
 
   // ---------- Einstellungen ----------
   const CFG = Object.assign({
@@ -76,6 +76,7 @@
   let sb = null, session = null, syncing = false, syncError = null;
   let view = "today";
   let lastToday = todayStr();
+  let hiddenAt = Date.now();
   let viewDay = lastToday;
   let editing = null;   // { day, slot, newSlot }
   let sheetWalkers = [me], sheetPoo = 0, deleteArmed = false;
@@ -127,8 +128,7 @@
     const d = parseYmd(s);
     if (unit === "d") d.setDate(d.getDate() + every);
     else if (unit === "w") d.setDate(d.getDate() + every * 7);
-    else if (unit === "m") { const day = d.getDate(); d.setDate(1); d.setMonth(d.getMonth() + every); d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate())); }
-    else if (unit === "y") d.setFullYear(d.getFullYear() + every);
+    else if (unit === "m" || unit === "y") { if (unit === "y") every *= 12; const day = d.getDate(); d.setDate(1); d.setMonth(d.getMonth() + every); d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate())); }
     return ymd(d);
   }
   const daysBetween = (a, b) => Math.round((parseYmd(b) - parseYmd(a)) / 86400000);
@@ -152,7 +152,6 @@
   const fmtDateShort = (s) => parseYmd(s).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "long" });
   const fmtDay = (s) => parseYmd(s).toLocaleDateString("de-DE", { day: "numeric", month: "long", year: "numeric" });
   const fmtDM = (s) => parseYmd(s).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
-  const fmtNum = (n) => n.toLocaleString("de-DE");
 
   // ---------- Auswertung Runden ----------
   const isDone = (r) => !!(r && r.ended_at);
@@ -227,7 +226,8 @@
 
   // ---------- Speichern ----------
   function persist() { ls.set(P + "walks", walks); ls.set(P + "items", items); ls.set(P + "pending", pending); }
-  function queue(op) { const k = opKey(op); pending = pending.filter((p) => opKey(p) !== k); pending.push(op); }
+  let touched = new Set(); // seit Beginn des laufenden Abrufs lokal geänderte Schlüssel
+  function queue(op) { const k = opKey(op); touched.add(k); pending = pending.filter((p) => opKey(p) !== k); pending.push(op); }
 
   function saveRec(rec) {
     rec.updated_at = new Date().toISOString();
@@ -270,8 +270,14 @@
     if (op.op === "item") return sb.from("app_data").upsert({ id: op.item.id, kind: op.item.kind, data: op.item.data, updated_at: op.item.updated_at });
     return sb.from("app_data").delete().eq("id", op.id);
   }
-  async function flush() {
-    if (DEMO || !session || syncing) return;
+  // Läuft schon ein Abgleich, wird auf denselben gewartet (wichtig für die "Neuer Termin"-Nachricht)
+  let flushing = null;
+  function flush() {
+    if (DEMO || !session) return Promise.resolve();
+    if (!flushing) flushing = doFlush().finally(() => { flushing = null; });
+    return flushing;
+  }
+  async function doFlush() {
     if (!navigator.onLine) { render(); return; }
     syncing = true;
     try {
@@ -290,10 +296,11 @@
       render();
     }
   }
-  async function fetchAll(table, order) {
+  async function fetchAll(table, order, tie) {
     const rows = [];
     for (let from = 0; ; from += 1000) {
-      const { data, error } = await sb.from(table).select("*").order(order).range(from, from + 999);
+      // eindeutige Sortierung, sonst können beim Blättern Zeilen fehlen
+      const { data, error } = await sb.from(table).select("*").order(order).order(tie).range(from, from + 999);
       if (error) throw error;
       rows.push(...data);
       if (data.length < 1000) return rows;
@@ -302,17 +309,21 @@
   async function pull() {
     if (DEMO || !session || !navigator.onLine) { render(); return; }
     await flush();
-    const waiting = new Set(pending.map(opKey));
+    touched = new Set();
+    // Schlüssel mit lokalen, noch nicht bestätigten Änderungen erst nach dem Laden bestimmen
+    const keep = () => new Set([...pending.map(opKey), ...touched]);
     let err = null;
     try {
-      const data = await fetchAll("walks", "day");
+      const data = await fetchAll("walks", "day", "slot");
+      const waiting = keep();
       const next = {};
       for (const [k, r] of Object.entries(walks)) if (waiting.has(k)) next[k] = r;
       for (const r of data) { const k = key(r.day, r.slot); if (!waiting.has(k)) next[k] = normalize({ ...r }); }
       walks = next;
     } catch (e) { err = e; }
     try {
-      const data = await fetchAll("app_data", "updated_at");
+      const data = await fetchAll("app_data", "updated_at", "id");
+      const waiting = keep();
       const next = {};
       for (const [id, it] of Object.entries(items)) if (waiting.has("item|" + id)) next[id] = it;
       for (const r of data) if (!waiting.has("item|" + r.id)) next[r.id] = { id: r.id, kind: r.kind, data: r.data || {}, updated_at: r.updated_at };
@@ -468,7 +479,7 @@
     if (d.note) L.push("DESCRIPTION:" + esc(d.note));
     for (const days of d.remind || []) {
       // Ganztägig: Erinnerung um 8 Uhr am jeweiligen Tag
-      const trig = d.time ? (days ? "-P" + days + "D" : "-PT1H") : (days ? "-P" + (days - 1) + "DT16H" : "PT8H");
+      const trig = d.time ? (days ? "-P" + days + "D" : "PT0M") : (days ? "-P" + (days - 1) + "DT16H" : "PT8H");
       L.push("BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:" + esc(apTitle(ap)), "TRIGGER:" + trig, "END:VALARM");
     }
     L.push("END:VEVENT", "END:VCALENDAR");
@@ -534,44 +545,49 @@
   }
 
   // Karten für die vier Runden eines Tages. live = heute (▶, Pause, Erledigt), sonst Nachtragen (Ø, Genau).
-  function renderRoundList(ol, day, live) {
+  // Eine Runden-Karte. live = heute (▶, Pause, Erledigt), sonst Nachtragen (Ø, Genau).
+  function roundCard(day, slot, live) {
+    const r = ROUNDS[slot - 1], rec = walks[key(day, slot)];
+    const li = h("li", { class: "round" + (isDone(rec) ? " done" : isRunning(rec) ? " running" : "") + (isPaused(rec) ? " paused" : "") });
+    if (rec) { li.style.setProperty("--wc", walkerColor(recColorKey(rec))); li.style.setProperty("--wc-ink", walkerInk(recColorKey(rec))); }
+    li.append(h("span", { class: "num", "aria-hidden": "true" }, isDone(rec) ? "✓" : String(slot)));
+    const body = h("button", { class: "rbody", type: "button", "aria-label": r.name + (rec ? " korrigieren" : " eintragen") });
+    body.append(h("span", { class: "rname" }, r.name), metaNode(rec));
+    body.onclick = () => openSheet(day, slot);
+    li.append(body);
+    const act = h("div", { class: "ractions" });
+    const together = rec && CFG.WALKERS.length > 1
+      ? toggleBtn("👥", "iconchip both", isTogether(rec), isTogether(rec) ? "Zusammen gegangen, antippen für allein" : "Zusammen gegangen?", () => toggleTogether(rec))
+      : null;
+    if (isRunning(rec)) {
+      const pb = isPaused(rec)
+        ? button("▶", "iconchip pause on", () => resumeWalk(rec))
+        : button("⏸", "iconchip pause", () => pauseWalk(rec));
+      pb.setAttribute("aria-label", isPaused(rec) ? "Weitergehen" : "Pause");
+      const lp = toggleBtn("💩", "iconchip poo", rec.poo > 0, "Häufchen jetzt eintragen, bisher " + rec.poo, () => addPoo(rec));
+      if (rec.poo > 1) lp.append(h("span", { class: "count" }, String(rec.poo)));
+      act.append(together, pb, button("Stopp", "btn small run", () => stopWalk(rec)), lp);
+    } else if (isDone(rec)) {
+      const p = toggleBtn("💩", "iconchip poo", rec.poo > 0, "Häufchen dazuzählen, bisher " + rec.poo, () => addPoo(rec));
+      if (rec.poo > 1) p.append(h("span", { class: "count" }, String(rec.poo)));
+      act.append(together, p);
+    } else if (live) {
+      const s = button("▶", "btn small play", () => startWalk(slot));
+      s.setAttribute("aria-label", "Runde starten (Zeit messen)");
+      act.append(s, button("Erledigt", "btn small primary", () => quickDone(day, slot)));
+    } else {
+      act.append(button("Genau", "btn small", () => openSheet(day, slot, true)),
+        button("Ø " + avgDuration(slot), "btn small primary", () => quickDone(day, slot)));
+    }
+    li.append(act);
+    return li;
+  }
+  // filter wählt aus, welche Runden in diese Liste gehören
+  function renderRoundList(ol, day, live, filter) {
     ol.textContent = "";
-    ROUNDS.forEach((r, i) => {
-      const slot = i + 1, rec = walks[key(day, slot)];
-      const li = h("li", { class: "round" + (isDone(rec) ? " done" : isRunning(rec) ? " running" : "") + (isPaused(rec) ? " paused" : "") });
-      if (rec) { li.style.setProperty("--wc", walkerColor(recColorKey(rec))); li.style.setProperty("--wc-ink", walkerInk(recColorKey(rec))); }
-      li.append(h("span", { class: "num", "aria-hidden": "true" }, isDone(rec) ? "✓" : String(slot)));
-      const body = h("button", { class: "rbody", type: "button", "aria-label": r.name + (rec ? " korrigieren" : " eintragen") });
-      body.append(h("span", { class: "rname" }, r.name), metaNode(rec));
-      body.onclick = () => openSheet(day, slot);
-      li.append(body);
-      const act = h("div", { class: "ractions" });
-      const together = rec && CFG.WALKERS.length > 1
-        ? toggleBtn("👥", "iconchip both", isTogether(rec), isTogether(rec) ? "Zusammen gegangen, antippen für allein" : "Zusammen gegangen?", () => toggleTogether(rec))
-        : null;
-      if (isRunning(rec)) {
-        const pb = isPaused(rec)
-          ? button("▶", "iconchip pause on", () => resumeWalk(rec))
-          : button("⏸", "iconchip pause", () => pauseWalk(rec));
-        pb.setAttribute("aria-label", isPaused(rec) ? "Weitergehen" : "Pause");
-        const lp = toggleBtn("💩", "iconchip poo", rec.poo > 0, "Häufchen jetzt eintragen, bisher " + rec.poo, () => addPoo(rec));
-        if (rec.poo > 1) lp.append(h("span", { class: "count" }, String(rec.poo)));
-        act.append(together, pb, button("Stopp", "btn small run", () => stopWalk(rec)), lp);
-      } else if (isDone(rec)) {
-        const p = toggleBtn("💩", "iconchip poo", rec.poo > 0, "Häufchen dazuzählen, bisher " + rec.poo, () => addPoo(rec));
-        if (rec.poo > 1) p.append(h("span", { class: "count" }, String(rec.poo)));
-        act.append(together, p);
-      } else if (live) {
-        const s = button("▶", "btn small play", () => startWalk(slot));
-        s.setAttribute("aria-label", "Runde starten (Zeit messen)");
-        act.append(s, button("Erledigt", "btn small primary", () => quickDone(day, slot)));
-      } else {
-        act.append(button("Genau", "btn small", () => openSheet(day, slot, true)),
-          button("Ø " + avgDuration(slot), "btn small primary", () => quickDone(day, slot)));
-      }
-      li.append(act);
-      ol.append(li);
-    });
+    for (let slot = 1; slot <= NR; slot++) {
+      if (!filter || filter(walks[key(day, slot)])) ol.append(roundCard(day, slot, live));
+    }
   }
 
   // ---------- Push-Benachrichtigungen ----------
@@ -668,17 +684,81 @@
   }
 
   // ---------- Kalender ----------
-  // Termine liegen als kind "event" in app_data. Zeiten als Ortszeit "YYYY-MM-DDTHH:MM".
+  // Termine liegen als kind "event" in app_data, Zeiten als Ortszeit "YYYY-MM-DDTHH:MM".
+  // Feiertage werden berechnet, nicht gespeichert.
+  const REMIND_TIMED = [15, 60, 240, 1440, 4320, 10080];
+  const REMIND_ALLDAY = [0, 1440, 4320, 10080];
+  const EV_COLORS = [
+    { c: "", label: "Standard (nach Person)" }, { c: "#e5484d", label: "Rot" }, { c: "#f76b15", label: "Orange" },
+    { c: "#7a8b22", label: "Oliv" }, { c: "#d6409f", label: "Pink" }, { c: "#8d6e63", label: "Braun" },
+    { c: "#475569", label: "Schiefer" }
+  ];
+  const STATES = {
+    "": "Keine", BW: "Baden-Württemberg", BY: "Bayern", BE: "Berlin", BB: "Brandenburg", HB: "Bremen", HH: "Hamburg",
+    HE: "Hessen", MV: "Mecklenburg-Vorpommern", NI: "Niedersachsen", NW: "Nordrhein-Westfalen", RP: "Rheinland-Pfalz",
+    SL: "Saarland", SN: "Sachsen", ST: "Sachsen-Anhalt", SH: "Schleswig-Holstein", TH: "Thüringen"
+  };
+  let holidayState = ls.get("rr.holidays", "BE");
   let calMonth = calToday().slice(0, 8) + "01";
   let calSel = calToday();
-  let evEditing = null, evWho = [me], evAllDay = false, evRemind = [60], evOcc = null, evDelArmed = false;
-  const EV_REMIND_TIMED = [{ m: 0, label: "Zum Beginn" }, { m: 15, label: "15 Min." }, { m: 60, label: "1 Std." }, { m: 1440, label: "1 Tag" }, { m: 10080, label: "1 Woche" }];
-  const EV_REMIND_ALLDAY = [{ m: 0, label: "Am Tag, 8 Uhr" }, { m: 1440, label: "1 Tag vorher" }, { m: 10080, label: "1 Woche vorher" }];
+  let evEditing = null, evWho = [me], evAllDay = false, evRemind = [60], evColorSel = "", evOcc = null, evDelArmed = false;
+
   const calEvents = () => Object.values(items).filter((i) => i.kind === "event" && i.data && i.data.start);
   const whoKey = (who) => !who || !who.length ? null : who.length > 1 ? TOGETHER : who[0];
-  const evColor = (ev) => { const k = whoKey(ev.data.who); return k ? walkerColor(k) : "var(--muted)"; };
-  const evInk = (ev) => { const k = whoKey(ev.data.who); return k ? walkerInk(k) : "#fff"; };
-  const isMobileApple = () => /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) && "ontouchend" in document;
+  const evColor = (ev) => { if (ev.data.color) return ev.data.color; const k = whoKey(ev.data.who); return k ? walkerColor(k) : "var(--muted)"; };
+  const evInk = (ev) => { if (ev.data.color) return "#fff"; const k = whoKey(ev.data.who); return k ? walkerInk(k) : "#fff"; };
+  const isRecurring = (d) => !!(d.repeat && d.repeat.freq && d.repeat.freq !== "0");
+  const isAppleTouch = () => /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) && "ontouchend" in document;
+
+  function remindLabel(m, allDay) {
+    if (m === 0) return allDay ? "Am Tag, 8 Uhr" : "Zum Beginn";
+    const suffix = allDay ? " vorher" : "";
+    if (m % 10080 === 0) return (m / 10080 === 1 ? "1 Woche" : m / 10080 + " Wochen") + suffix;
+    if (m % 1440 === 0) return (m / 1440 === 1 ? "1 Tag" : m / 1440 + " Tage") + suffix;
+    if (m % 60 === 0) return m / 60 + " Std." + suffix;
+    return m + " Min." + suffix;
+  }
+
+  // Gesetzliche Feiertage je Bundesland (Stand der Landesgesetze; einmalige Sonderfeiertage fehlen)
+  function easterSunday(y) {
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+    const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), hh = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - hh - k) % 7, m = Math.floor((a + 11 * hh + 22 * l) / 451);
+    const month = Math.floor((hh + l - 7 * m + 114) / 31), day = ((hh + l - 7 * m + 114) % 31) + 1;
+    return y + "-" + pad(month) + "-" + pad(day);
+  }
+  const holidayCache = {};
+  function holidaysOf(y, st) {
+    const ck = y + st;
+    if (holidayCache[ck]) return holidayCache[ck];
+    const map = {};
+    if (st) {
+      const e = easterSunday(y);
+      const add = (date, name, states) => { if (!states || states.includes(st)) map[date] = name; };
+      add(y + "-01-01", "Neujahr");
+      add(y + "-01-06", "Heilige Drei Könige", ["BW", "BY", "ST"]);
+      add(y + "-03-08", "Frauentag", ["BE", "MV"]);
+      add(addDays(e, -2), "Karfreitag");
+      add(e, "Ostersonntag", ["BB"]);
+      add(addDays(e, 1), "Ostermontag");
+      add(y + "-05-01", "Tag der Arbeit");
+      add(addDays(e, 39), "Christi Himmelfahrt");
+      add(addDays(e, 49), "Pfingstsonntag", ["BB"]);
+      add(addDays(e, 50), "Pfingstmontag");
+      add(addDays(e, 60), "Fronleichnam", ["BW", "BY", "HE", "NW", "RP", "SL"]);
+      add(y + "-08-15", "Mariä Himmelfahrt", ["SL"]);
+      add(y + "-09-20", "Weltkindertag", ["TH"]);
+      add(y + "-10-03", "Tag der Deutschen Einheit");
+      add(y + "-10-31", "Reformationstag", ["BB", "HB", "HH", "MV", "NI", "SN", "ST", "SH", "TH"]);
+      add(y + "-11-01", "Allerheiligen", ["BW", "BY", "NW", "RP", "SL"]);
+      const nov22 = y + "-11-22";
+      add(addDays(nov22, -((parseYmd(nov22).getDay() - 3 + 7) % 7)), "Buß- und Bettag", ["SN"]);
+      add(y + "-12-25", "1. Weihnachtstag");
+      add(y + "-12-26", "2. Weihnachtstag");
+    }
+    return (holidayCache[ck] = map);
+  }
+  const holidayOn = (ymd) => holidaysOf(Number(ymd.slice(0, 4)), holidayState)[ymd] || null;
 
   function repeatStep(base, freq, n) {
     if (freq === "d") return addDays(base, n);
@@ -688,27 +768,30 @@
     if (freq === "y") return addInterval(base, n, "y");
     return base;
   }
-  // Alle Vorkommen eines Termins, die den Zeitraum [from, to] berühren
+  const inPause = (d, day) => !!(d.pause && d.pause.from && d.pause.to && day >= d.pause.from && day <= d.pause.to);
+  // Alle Vorkommen eines Termins, die den Zeitraum [from, to] berühren. Ab dem n-ten Schritt
+  // vom Starttag aus gerechnet, damit Monatsenden (31.) nicht wandern.
   function evOccurrences(ev, from, to) {
     const d = ev.data, out = [];
-    const sDate = d.start.slice(0, 10), eDate = (d.end || d.start).slice(0, 10);
-    const span = Math.max(0, daysBetween(sDate, eDate));
-    const freq = d.repeat && d.repeat.freq && d.repeat.freq !== "0" ? d.repeat.freq : null;
+    const sDate = d.start.slice(0, 10);
+    const span = Math.max(0, daysBetween(sDate, (d.end || d.start).slice(0, 10)));
+    const freq = isRecurring(d) ? d.repeat.freq : null;
     const until = freq && d.repeat.until ? d.repeat.until : null;
     const ex = new Set(d.exdates || []);
     for (let n = 0; n < 4000; n++) {
       const cur = freq ? repeatStep(sDate, freq, n) : sDate;
       if (cur > to || (until && cur > until)) break;
       const end = addDays(cur, span);
-      if (end >= from && !ex.has(cur)) out.push({ ev, date: cur, endDate: end });
+      if (end >= from && !ex.has(cur) && !inPause(d, cur)) out.push({ ev, date: cur, endDate: end });
       if (!freq) break;
     }
     return out;
   }
-  // Tag -> Liste der Einträge (Termine und Rüdigers Behandlungen)
+  // Tag -> Einträge (Feiertage, Termine, Rüdigers Behandlungen) für den Zeitraum [from, to]
   function calMap(from, to) {
     const map = {};
     const put = (day, entry) => { (map[day] = map[day] || []).push(entry); };
+    for (let d = from; d <= to; d = addDays(d, 1)) { const name = holidayOn(d); if (name) put(d, { type: "hol", name, day: d }); }
     for (const ev of calEvents()) {
       for (const o of evOccurrences(ev, from, to)) {
         for (let d = o.date < from ? from : o.date; d <= o.endDate && d <= to; d = addDays(d, 1)) put(d, { type: "ev", ev, occ: o, day: d });
@@ -718,20 +801,22 @@
     for (const k of Object.keys(map)) map[k].sort(entrySort);
     return map;
   }
+  const isSpan = (e) => e.type === "ev" && e.occ.endDate > e.occ.date;
   function entryTime(e) {
     if (e.type === "care") return e.ap.data.time || "";
-    const d = e.ev.data;
-    if (d.allDay) return "";
-    if (e.day === e.occ.date) return d.start.slice(11, 16);
-    return "";
+    if (e.type !== "ev" || e.ev.data.allDay || e.day !== e.occ.date) return "";
+    return e.ev.data.start.slice(11, 16);
   }
+  // Reihenfolge: Feiertag, mehrtägige, ganztägige, dann nach Uhrzeit
   function entrySort(a, b) {
-    const ta = entryTime(a), tb = entryTime(b);
-    if (!ta && tb) return -1;
-    if (ta && !tb) return 1;
-    return ta.localeCompare(tb);
+    const rank = (e) => e.type === "hol" ? 0 : isSpan(e) ? 1 : entryTime(e) ? 3 : 2;
+    const ra = rank(a), rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    if (ra === 1) return a.occ.date.localeCompare(b.occ.date) || b.occ.endDate.localeCompare(a.occ.endDate);
+    return entryTime(a).localeCompare(entryTime(b));
   }
   function entryWhen(e) {
+    if (e.type === "hol") return "Feiertag · " + STATES[holidayState];
     if (e.type === "care") return e.ap.data.time ? e.ap.data.time + " Uhr" : "Rüdiger";
     const d = e.ev.data;
     if (d.allDay) return e.occ.date === e.occ.endDate ? "Ganztägig" : "bis " + fmtDM(e.occ.endDate);
@@ -742,31 +827,81 @@
     return "ganztägig";
   }
   function entryNode(e, showDate) {
+    const prefix = showDate ? fmtDM(e.day) + " · " : "";
+    if (e.type === "hol") {
+      return h("li", { class: "ev hol" }, h("span", { class: "evbar" }),
+        h("div", { class: "evbody" }, h("span", { class: "evtitle" }, e.name), h("span", { class: "evmeta" }, prefix + entryWhen(e))));
+    }
     if (e.type === "care") {
       const li = h("li", { class: "ev care" }, h("span", { class: "evbar" }),
         h("button", { class: "evbody", type: "button" },
           h("span", { class: "evtitle" }, careType(e.ap.data.type).icon + " " + apTitle(e.ap)),
-          h("span", { class: "evmeta" }, (showDate ? fmtDM(e.day) + " · " : "") + entryWhen(e))));
+          h("span", { class: "evmeta" }, prefix + entryWhen(e))));
       li.querySelector(".evbody").onclick = () => openApSheet(e.ap);
       return li;
     }
     const d = e.ev.data;
-    const meta = [(showDate ? fmtDM(e.day) + " · " : "") + entryWhen(e)];
+    const meta = [prefix + entryWhen(e)];
     if (d.who && d.who.length) meta.push(d.who.length > 1 ? "Beide" : d.who[0]);
-    const body = h("button", { class: "evbody", type: "button" },
-      h("span", { class: "evtitle" }, d.title || "Termin"),
-      h("span", { class: "evmeta" }, meta.join(" · ")));
+    const title = h("span", { class: "evtitle" }, d.title || "Termin");
+    if (isRecurring(d)) title.append(h("span", { class: "evrep", "aria-label": "wiederholt sich" }, " ↻"));
+    const body = h("button", { class: "evbody", type: "button" }, title, h("span", { class: "evmeta" }, meta.join(" · ")));
     if (d.location) body.append(h("span", { class: "evloc" }, "📍 " + d.location));
-    if (d.repeat && d.repeat.freq && d.repeat.freq !== "0") body.querySelector(".evtitle").append(h("span", { class: "evrep", "aria-label": "wiederholt sich" }, " ↻"));
     body.onclick = () => openEvSheet(e.ev, e.occ);
     const li = h("li", { class: "ev" }, h("span", { class: "evbar" }), body);
     li.style.setProperty("--evc", evColor(e.ev));
     return li;
   }
 
+  // Monatsraster: mehrtägige Termine bekommen pro Woche eine feste Zeile ("Spur"),
+  // damit sie als durchgehender Balken über die Tage laufen.
+  const CELL_CHIPS = 3;
+  function weekLanes(weekStart, map) {
+    const spans = [];
+    const seen = new Set();
+    for (let i = 0; i < 7; i++) {
+      for (const e of map[addDays(weekStart, i)] || []) {
+        if (!isSpan(e)) continue;
+        const id = e.ev.id + "|" + e.occ.date;
+        if (!seen.has(id)) { seen.add(id); spans.push(e.occ); }
+      }
+    }
+    spans.sort((a, b) => a.date.localeCompare(b.date) || b.endDate.localeCompare(a.endDate));
+    const lanes = [];   // lanes[i] = letzter belegter Tag
+    const laneOf = {};
+    for (const o of spans) {
+      const s = o.date < weekStart ? weekStart : o.date;
+      let i = lanes.findIndex((last) => last < s);
+      if (i < 0) { i = lanes.length; lanes.push(""); }
+      lanes[i] = o.endDate;
+      laneOf[o.ev.id + "|" + o.date] = i;
+    }
+    return { laneOf, count: lanes.length };
+  }
+  function calChip(e, day, weekStart) {
+    if (e.type === "hol") return h("span", { class: "calchip hol" }, e.name);
+    if (e.type === "care") return h("span", { class: "calchip care" }, "🐶 " + apTitle(e.ap));
+    const chip = h("span", { class: "calchip" }, e.ev.data.title || "Termin");
+    chip.style.background = evColor(e.ev);
+    chip.style.color = evInk(e.ev);
+    if (isSpan(e)) {
+      const first = day === e.occ.date || day === weekStart;
+      chip.classList.add("span");
+      if (day !== e.occ.date && day !== weekStart) chip.classList.add("cont-l");
+      if (day !== e.occ.endDate && parseYmd(day).getDay() !== 0) chip.classList.add("cont-r");
+      if (!first) chip.textContent = " ";
+      else if (chip.classList.contains("cont-r")) {
+        // Titel über die ganze Balkenlänge der Woche lesbar machen
+        const weekEnd = addDays(weekStart, 6);
+        const n = daysBetween(day, e.occ.endDate < weekEnd ? e.occ.endDate : weekEnd) + 1;
+        chip.classList.add("head");
+        chip.style.width = "calc(" + n * 100 + "% + " + (n - 1) * 9 + "px)"; // 9px = Abstand + Rand + Innenabstand der Zellen (styles.css .calgrid/.calcell)
+      }
+    }
+    return chip;
+  }
   function renderCal() {
-    const first = parseYmd(calMonth);
-    const lead = (first.getDay() + 6) % 7;
+    const lead = (parseYmd(calMonth).getDay() + 6) % 7;
     const gridStart = addDays(calMonth, -lead);
     const monthEnd = addDays(addInterval(calMonth, 1, "m"), -1);
     const weeks = Math.ceil((lead + daysBetween(calMonth, monthEnd) + 1) / 7);
@@ -775,38 +910,50 @@
     const t = calToday();
     const grid = $("calGrid");
     grid.textContent = "";
-    for (let i = 0; i < weeks * 7; i++) {
-      const d = addDays(gridStart, i);
-      const list = map[d] || [];
-      const cell = h("button", { class: "calcell" + (d.slice(0, 7) !== calMonth.slice(0, 7) ? " other" : "") + (d === t ? " today" : "") + (d === calSel ? " sel" : ""),
-        type: "button", "aria-label": fmtDate(d) + (list.length ? ", " + list.length + " Einträge" : "") });
-      cell.append(h("span", { class: "calnum" }, String(parseYmd(d).getDate())));
-      list.slice(0, 3).forEach((e) => {
-        const chip = h("span", { class: "calchip" + (e.type === "care" ? " care" : "") }, e.type === "care" ? "🐶 " + apTitle(e.ap) : (e.ev.data.title || "Termin"));
-        if (e.type === "ev") { chip.style.background = evColor(e.ev); chip.style.color = evInk(e.ev); }
-        cell.append(chip);
-      });
-      if (list.length > 3) cell.append(h("span", { class: "calmore" }, "+" + (list.length - 3)));
-      cell.onclick = () => { calSel = d; renderCal(); };
-      grid.append(cell);
+    for (let w = 0; w < weeks; w++) {
+      const weekStart = addDays(gridStart, w * 7);
+      const { laneOf, count } = weekLanes(weekStart, map);
+      for (let i = 0; i < 7; i++) {
+        const d = addDays(weekStart, i);
+        const list = map[d] || [];
+        const hol = list.find((e) => e.type === "hol");
+        const cell = h("button", {
+          class: "calcell" + (d.slice(0, 7) !== calMonth.slice(0, 7) ? " other" : "") + (d === t ? " today" : "") + (d === calSel ? " sel" : "") + (hol ? " holiday" : ""),
+          type: "button", "aria-label": fmtDate(d) + (hol ? ", " + hol.name : "") + (list.length ? ", " + list.length + " Einträge" : "")
+        });
+        cell.append(h("span", { class: "calnum" }, String(parseYmd(d).getDate())));
+        // feste Spuren für mehrtägige Termine, Lücken als Platzhalter
+        const slots = Array(Math.min(count, CELL_CHIPS)).fill(null);
+        const rest = [];
+        for (const e of list) {
+          const lane = isSpan(e) ? laneOf[e.ev.id + "|" + e.occ.date] : undefined;
+          if (lane !== undefined && lane < slots.length) slots[lane] = e; else if (lane === undefined) rest.push(e);
+        }
+        while (slots.length && !slots[slots.length - 1]) slots.pop(); // keine leeren Spuren am Ende
+        const chips = slots.map((e) => e ? calChip(e, d, weekStart) : h("span", { class: "calchip gap" }, " "));
+        for (const e of rest) chips.push(calChip(e, d, weekStart));
+        chips.slice(0, CELL_CHIPS).forEach((c) => cell.append(c));
+        const hidden = list.length - chips.slice(0, CELL_CHIPS).filter((c) => !c.classList.contains("gap")).length;
+        if (hidden > 0) cell.append(h("span", { class: "calmore" }, "+" + hidden));
+        cell.onclick = () => { calSel = d; renderCal(); };
+        grid.append(cell);
+      }
     }
     // gewählter Tag
     $("calDayTitle").textContent = (calSel === t ? "Heute · " : "") + fmtDateShort(calSel);
     const dayList = $("calDayList");
     dayList.textContent = "";
-    const sel = calMap(calSel, calSel)[calSel] || [];
+    const sel = (calSel >= gridStart && calSel <= gridEnd ? map : calMap(calSel, calSel))[calSel] || [];
     if (!sel.length) dayList.append(h("li", { class: "evempty" }, "Keine Termine"));
     for (const e of sel) dayList.append(entryNode(e, false));
-    // demnächst: die nächsten Termine ab morgen (bzw. nach dem gewählten Tag)
+    // Demnächst: die nächsten Einträge nach dem gewählten Tag (mindestens ab morgen)
     const upFrom = addDays(calSel > t ? calSel : t, 1);
     const upMap = calMap(upFrom, addDays(upFrom, 60));
-    const up = [];
-    const seen = new Set();
+    const up = [], seen = new Set();
     for (const day of Object.keys(upMap).sort()) {
       for (const e of upMap[day]) {
-        const id = e.type === "care" ? "c" + e.ap.id : e.ev.id + e.occ.date;
-        if (seen.has(id)) continue;
-        seen.add(id); up.push(e);
+        const id = e.type === "ev" ? e.ev.id + e.occ.date : e.type === "care" ? "care" + e.ap.id : e.type + day;
+        if (!seen.has(id)) { seen.add(id); up.push(e); }
       }
       if (up.length >= 6) break;
     }
@@ -815,58 +962,66 @@
     ul.textContent = "";
     for (const e of up.slice(0, 6)) ul.append(entryNode(e, true));
   }
+  function calGoToday() { calSel = calToday(); calMonth = calSel.slice(0, 8) + "01"; }
 
   function renderTodayEvents(isToday) {
     const box = $("todayEvents");
     box.textContent = "";
     if (!isToday) return;
-    const list = (calMap(calToday(), calToday())[calToday()] || []).filter((e) => e.type === "ev");
+    const day = calToday();
+    const list = (calMap(day, day)[day] || []).filter((e) => e.type !== "care");
     if (!list.length) return;
     const ol = h("ol", { class: "evlist compact" });
     for (const e of list) ol.append(entryNode(e, false));
     box.append(h("div", { class: "todayhead" }, h("span", {}, "Heute im Kalender"),
-      button("Kalender", "linkbtn", () => { calSel = calToday(); calMonth = calSel.slice(0, 8) + "01"; setView("cal"); })), ol);
+      button("Kalender", "linkbtn", () => setView("cal"))), ol);
   }
 
-  // Termin-Formular
-  function renderEvChips() {
+  // ---------- Termin-Formular ----------
+  function chip(label, pressed, onClick, color, ink) {
+    const b = button(label, "chip", onClick);
+    b.setAttribute("aria-pressed", String(pressed));
+    if (color) { b.style.setProperty("--chip-on", color); b.style.setProperty("--chip-on-ink", ink); }
+    return b;
+  }
+  function renderEvForm() {
     const wc = $("evWho");
     wc.textContent = "";
     for (const w of CFG.WALKERS) {
-      const b = button(w, "chip", () => {
-        if (evWho.includes(w)) { if (evWho.length > 1) evWho = evWho.filter((x) => x !== w); }
-        else evWho = CFG.WALKERS.filter((x) => x === w || evWho.includes(x));
-        renderEvChips();
-      });
-      b.setAttribute("aria-pressed", String(evWho.includes(w)));
-      b.style.setProperty("--chip-on", walkerColor(w));
-      b.style.setProperty("--chip-on-ink", walkerInk(w));
-      wc.append(b);
+      wc.append(chip(w, evWho.length === 1 && evWho[0] === w, () => { evWho = [w]; renderEvForm(); }, walkerColor(w), walkerInk(w)));
     }
-    const both = button("Beide", "chip", () => { evWho = CFG.WALKERS.slice(); renderEvChips(); });
-    both.setAttribute("aria-pressed", String(evWho.length === CFG.WALKERS.length));
-    both.style.setProperty("--chip-on", walkerColor(TOGETHER));
-    both.style.setProperty("--chip-on-ink", walkerInk(TOGETHER));
-    wc.append(both);
+    if (CFG.WALKERS.length > 1) {
+      wc.append(chip("Beide", evWho.length > 1, () => { evWho = CFG.WALKERS.slice(); renderEvForm(); }, walkerColor(TOGETHER), walkerInk(TOGETHER)));
+    }
+    const cc = $("evColors");
+    cc.textContent = "";
+    for (const o of EV_COLORS) {
+      const sw = button("", "swatch" + (o.c ? "" : " std"), () => { evColorSel = o.c; renderEvForm(); });
+      sw.style.setProperty("--sw", o.c || walkerColor(whoKey(evWho) || TOGETHER));
+      sw.setAttribute("aria-label", o.label);
+      sw.setAttribute("aria-pressed", String(evColorSel === o.c));
+      cc.append(sw);
+    }
     $("evAllDay").setAttribute("aria-pressed", String(evAllDay));
     document.querySelectorAll(".evtime").forEach((el) => { el.hidden = evAllDay; });
     const rc = $("evRemind");
     rc.textContent = "";
-    for (const o of evAllDay ? EV_REMIND_ALLDAY : EV_REMIND_TIMED) {
-      const b = button(o.label, "chip", () => {
-        evRemind = evRemind.includes(o.m) ? evRemind.filter((x) => x !== o.m) : [...evRemind, o.m];
-        renderEvChips();
-      });
-      b.setAttribute("aria-pressed", String(evRemind.includes(o.m)));
-      rc.append(b);
+    const opts = [...new Set([...(evAllDay ? REMIND_ALLDAY : REMIND_TIMED), ...evRemind])].sort((a, b) => a - b);
+    for (const m of opts) {
+      rc.append(chip(remindLabel(m, evAllDay), evRemind.includes(m), () => {
+        evRemind = evRemind.includes(m) ? evRemind.filter((x) => x !== m) : [...evRemind, m];
+        renderEvForm();
+      }));
     }
-    $("evUntilWrap").hidden = $("evRepeat").value === "0";
+    const recurring = $("evRepeat").value !== "0";
+    $("evUntilWrap").hidden = !recurring;
+    $("evPauseWrap").hidden = !recurring;
     const loc = $("evLocation").value.trim();
-    const map = $("evMap");
-    map.hidden = !loc;
-    if (loc) map.href = (isMobileApple() ? "https://maps.apple.com/?q=" : "https://www.google.com/maps/search/?api=1&query=") + encodeURIComponent(loc);
+    const mapLink = $("evMap");
+    mapLink.hidden = !loc;
+    if (loc) mapLink.href = (isAppleTouch() ? "https://maps.apple.com/?q=" : "https://www.google.com/maps/search/?api=1&query=") + encodeURIComponent(loc);
   }
-  function openEvSheet(ev, occ) {
+  function openEvSheet(ev, occ, presetDay) {
     evEditing = ev ? ev.id : "new";
     evOcc = occ || null;
     evDelArmed = false;
@@ -877,14 +1032,14 @@
     evWho = d && d.who && d.who.length ? d.who.slice() : [me];
     evAllDay = d ? !!d.allDay : false;
     evRemind = d ? (d.remind || []).slice() : [60];
+    evColorSel = d ? d.color || "" : "";
     let sDate, sTime, eDate, eTime;
     if (d) {
       sDate = d.start.slice(0, 10); sTime = d.allDay ? "" : d.start.slice(11, 16);
       eDate = (d.end || d.start).slice(0, 10); eTime = d.allDay ? "" : (d.end || d.start).slice(11, 16);
     } else {
-      const now = new Date();
-      const hh = Math.min(22, now.getHours() + 1);
-      sDate = calSel; eDate = calSel;
+      const hh = Math.min(22, new Date().getHours() + 1);
+      sDate = eDate = presetDay || calSel;
       sTime = pad(hh) + ":00"; eTime = pad(hh + 1) + ":00";
     }
     $("evStartDate").value = sDate; $("evStartTime").value = sTime || "18:00";
@@ -892,12 +1047,15 @@
     $("evLocation").value = d ? d.location || "" : "";
     $("evRepeat").value = d && d.repeat ? d.repeat.freq || "0" : "0";
     $("evUntil").value = d && d.repeat ? d.repeat.until || "" : "";
+    $("evPauseFrom").value = d && d.pause ? d.pause.from || "" : "";
+    $("evPauseTo").value = d && d.pause ? d.pause.to || "" : "";
     $("evNote").value = d ? d.note || "" : "";
+    $("evCustomNum").value = "";
     $("evDelete").hidden = !ev;
     $("evDelete").textContent = "Löschen";
     $("evActions").hidden = false;
     $("evDelChoice").hidden = true;
-    renderEvChips();
+    renderEvForm();
     $("evSheet").hidden = false;
     $("sheetBg").hidden = false;
     if (!ev) setTimeout(() => $("evTitle").focus(), 60);
@@ -905,25 +1063,33 @@
   function submitEv() {
     const title = $("evTitle").value.trim();
     if (!title) { $("evError").textContent = "Bitte einen Titel eingeben."; return; }
-    const sDate = $("evStartDate").value, eDateRaw = $("evEndDate").value || sDate;
-    const sTime = $("evStartTime").value || "00:00", eTime = $("evEndTime").value || sTime;
-    let start = evAllDay ? sDate + "T00:00" : sDate + "T" + sTime;
-    let end = evAllDay ? eDateRaw + "T23:59" : eDateRaw + "T" + eTime;
-    if (end < start) end = evAllDay ? sDate + "T23:59" : sDate + "T" + (eTime > sTime ? eTime : sTime);
+    const sDate = $("evStartDate").value;
+    if (!sDate) { $("evError").textContent = "Bitte ein Datum wählen."; return; }
+    const eDate = $("evEndDate").value && $("evEndDate").value >= sDate ? $("evEndDate").value : sDate;
+    const sTime = $("evStartTime").value || "00:00";
+    let eTime = $("evEndTime").value || sTime;
+    if (eDate === sDate && eTime < sTime) eTime = sTime;
     const freq = $("evRepeat").value;
+    const pFrom = $("evPauseFrom").value, pTo = $("evPauseTo").value;
     const old = evEditing !== "new" ? items[evEditing] : null;
+    if (evEditing !== "new" && !old) { $("evError").textContent = "Dieser Termin wurde inzwischen gelöscht."; return; }
     const data = {
       ...(old ? old.data : {}),
-      title, who: evWho.slice(), allDay: evAllDay, start, end,
+      title, who: evWho.slice(), allDay: evAllDay, color: evColorSel,
+      start: evAllDay ? sDate + "T00:00" : sDate + "T" + sTime,
+      end: evAllDay ? eDate + "T23:59" : eDate + "T" + eTime,
       location: $("evLocation").value.trim(), note: $("evNote").value.trim(),
-      repeat: { freq, until: freq !== "0" ? ($("evUntil").value || "") : "" },
-      remind: evRemind.slice(), exdates: old && old.data.exdates ? old.data.exdates : [],
+      repeat: { freq, until: freq !== "0" ? $("evUntil").value || "" : "" },
+      pause: freq !== "0" && pFrom && pTo && pTo >= pFrom ? { from: pFrom, to: pTo } : null,
+      remind: evRemind.slice().sort((a, b) => a - b),
+      exdates: old && old.data.exdates ? old.data.exdates : [],
       createdBy: old && old.data.createdBy ? old.data.createdBy : me
     };
     const item = old ? { ...old, data } : { id: uid(), kind: "event", data };
     saveItem(item);
     closeSheet();
-    calSel = sDate; calMonth = sDate.slice(0, 8) + "01";
+    // bei Serien auf dem bearbeiteten Tag bleiben, sonst zum (neuen) Beginn springen
+    if (!(old && evOcc && isRecurring(data))) { calSel = sDate; calMonth = sDate.slice(0, 8) + "01"; }
     render();
     toast(old ? "Termin gespeichert" : "Termin eingetragen");
     // Die anderen informieren, sobald der Termin in der Datenbank ist
@@ -935,12 +1101,19 @@
   function evDelete(all) {
     const ev = items[evEditing];
     if (!ev) return;
-    const recurring = ev.data.repeat && ev.data.repeat.freq && ev.data.repeat.freq !== "0";
-    if (!all && recurring && evOcc) {
+    if (!all && isRecurring(ev.data) && evOcc) {
       saveItem({ ...ev, data: { ...ev.data, exdates: [...(ev.data.exdates || []), evOcc.date] } });
     } else deleteItem(ev.id);
     closeSheet();
     toast("Termin gelöscht");
+  }
+  function addCustomRemind() {
+    const n = parseInt($("evCustomNum").value, 10);
+    if (!n || n < 1) return;
+    const m = n * Number($("evCustomUnit").value);
+    if (!evRemind.includes(m)) evRemind.push(m);
+    $("evCustomNum").value = "";
+    renderEvForm();
   }
   async function updatePushWalker() {
     if (DEMO || !session || !pushSupported()) return;
@@ -948,7 +1121,48 @@
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
       if (sub) await sb.from("push_subs").update({ walker: me }).eq("endpoint", sub.endpoint);
-    } catch { /* egal */ }
+    } catch { /* nicht kritisch */ }
+  }
+
+  function bindCalendar() {
+    $("calPrev").onclick = () => { calMonth = addInterval(calMonth, -1, "m"); render(); };
+    $("calNextBtn").onclick = () => { calMonth = addInterval(calMonth, 1, "m"); render(); };
+    $("calMonthBtn").onclick = () => { calGoToday(); render(); };
+    // Monat wechseln durch Wischen über das Raster
+    let touch = null;
+    const grid = $("calGrid");
+    grid.addEventListener("touchstart", (e) => { const t = e.touches[0]; touch = { x: t.clientX, y: t.clientY }; }, { passive: true });
+    grid.addEventListener("touchend", (e) => {
+      if (!touch) return;
+      const t = e.changedTouches[0], dx = t.clientX - touch.x, dy = t.clientY - touch.y;
+      touch = null;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        calMonth = addInterval(calMonth, dx < 0 ? 1 : -1, "m");
+        render();
+      }
+    }, { passive: true });
+    $("calAdd").onclick = () => openEvSheet(null);
+    $("evClose").onclick = closeSheet;
+    $("evSheet").addEventListener("submit", (e) => { e.preventDefault(); submitEv(); });
+    $("evAllDay").onclick = () => { evAllDay = !evAllDay; evRemind = evAllDay ? [1440] : [60]; renderEvForm(); };
+    $("evRepeat").addEventListener("change", renderEvForm);
+    $("evLocation").addEventListener("input", renderEvForm);
+    $("evCustomAdd").onclick = addCustomRemind;
+    $("evStartDate").addEventListener("change", () => { if ($("evEndDate").value < $("evStartDate").value) $("evEndDate").value = $("evStartDate").value; });
+    $("evStartTime").addEventListener("change", () => {
+      const [hh, mm] = $("evStartTime").value.split(":").map(Number);
+      if (!isNaN(hh) && $("evEndDate").value === $("evStartDate").value) $("evEndTime").value = pad(Math.min(23, hh + 1)) + ":" + pad(mm);
+    });
+    $("evDelete").onclick = () => {
+      const ev = items[evEditing];
+      if (ev && isRecurring(ev.data)) { $("evActions").hidden = true; $("evDelChoice").hidden = false; return; }
+      if (!evDelArmed) { evDelArmed = true; $("evDelete").textContent = "Wirklich löschen?"; return; }
+      evDelete(true);
+    };
+    $("evDelOne").onclick = () => evDelete(false);
+    $("evDelAll").onclick = () => evDelete(true);
+    $("evDelCancel").onclick = () => { $("evActions").hidden = false; $("evDelChoice").hidden = true; };
+    $("holidaySel").addEventListener("change", (e) => { holidayState = e.target.value; ls.set("rr.holidays", holidayState); render(); });
   }
 
   // ---------- Darstellung ----------
@@ -965,15 +1179,12 @@
   const VIEW_TITLES = { stats: "Statistik", care: "Rüdigers Termine", settings: "Optionen" };
   function renderHeader() {
     const t = todayStr();
-    const compact = view !== "today";
-    document.querySelector(".panel").classList.toggle("compact", compact);
+    const compact = view !== "today"; // Kopfbereich ist immer kompakt; auf "Heute" mit Tagesnavigation statt Titel
     $("viewTitle").hidden = !compact || view === "cal";
     $("viewTitle").textContent = VIEW_TITLES[view] || "";
     $("calNav").hidden = view !== "cal";
     $("calMonthBtn").textContent = parseYmd(calMonth).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
     document.querySelector(".daynav").hidden = compact;
-    document.querySelector(".scorewrap").hidden = compact;
-    $("roundsOf").hidden = compact;
     $("dayEyebrow").textContent = viewDay === t ? "Heute" : viewDay === addDays(t, -1) ? "Gestern" : "Nachtragen";
     $("dayDate").textContent = fmtDateShort(viewDay);
     $("pickDay").max = t;
@@ -1034,7 +1245,19 @@
       }
     }
     renderTodayEvents(isToday);
-    renderRoundList($("rounds"), viewDay, isToday);
+    // Heute: erledigte Runden eingeklappt, offene oben. Frühere Tage: alles sichtbar zum Nachtragen.
+    const box = $("doneBox");
+    if (isToday) {
+      renderRoundList($("rounds"), viewDay, true, (r) => !isDone(r));
+      renderRoundList($("doneRounds"), viewDay, true, isDone);
+      const ds = dayStats(viewDay);
+      box.hidden = !ds.rounds;
+      $("doneSum").textContent = "Erledigt: " + ds.rounds + (ds.rounds === 1 ? " Runde" : " Runden") + " · " + fmtHM(ds.mins);
+      if (ds.rounds === NR) $("rounds").append(h("li", { class: "evempty" }, "Alle Runden für heute erledigt."));
+    } else {
+      renderRoundList($("rounds"), viewDay, false);
+      box.hidden = true;
+    }
   }
 
   function renderHistory() {
@@ -1103,7 +1326,6 @@
     if (mins < 60) return { num: String(mins), unit: "Min." };
     return { num: (Math.round(mins / 6) / 10).toLocaleString("de-DE"), unit: "Std." };
   }
-  const fmtDur = (mins) => { const f = fmtHours(mins); return f.num + " " + f.unit; };
   function fmtHM(mins) {
     const hh = Math.floor(mins / 60), mm = mins % 60;
     return hh ? hh + " Std. " + (mm ? mm + " Min." : "") : mm + " Min.";
@@ -1285,6 +1507,9 @@
       b.style.setProperty("--chip-on-ink", walkerInk(w));
       chips.append(b);
     }
+    const hs = $("holidaySel");
+    if (!hs.options.length) for (const [k, v] of Object.entries(STATES)) hs.append(h("option", { value: k }, v));
+    hs.value = holidayState;
     let info;
     if (DEMO) info = "Testmodus ohne Datenbank.";
     else if (!session) info = "Nicht angemeldet.";
@@ -1317,12 +1542,15 @@
       "Frühere Tage: Pfeile oben oder auf das Datum tippen. Jede Runde lässt sich antippen und korrigieren oder löschen."
     ]);
     sec("Kalender", [
-      "Termine können für eine Person oder für beide eingetragen werden. Die Farbe zeigt, für wen: " + CFG.WALKERS.join(" und ") + " jeweils eigene Farbe, beide blau.",
-      "Tippen auf einen Tag zeigt seine Termine, + Termin legt einen neuen Termin für diesen Tag an. Tippen auf den Monat springt zu heute.",
-      "Erinnerungen kommen nur an die Personen, für die der Termin eingetragen ist. Bei ganztägigen Terminen um 8 Uhr.",
-      "Trägt jemand einen neuen Termin für beide ein, bekommt die andere Person eine Benachrichtigung.",
-      "Bei wiederkehrenden Terminen lässt sich beim Löschen wählen: nur dieser Tag oder die ganze Serie.",
-      "Rüdigers Behandlungen erscheinen ebenfalls im Kalender."
+      "Termine gelten für eine Person oder für beide. Standardfarbe nach Person: " + CFG.WALKERS.join(" und ") + " jeweils eigene Farbe, beide blau. Im Termin lässt sich auch eine andere Farbe wählen.",
+      "Rüdigers Behandlungen sind türkis, Feiertage rot hinterlegt. Das Bundesland für die Feiertage steht unter Optionen.",
+      "Mehrtägige Termine erscheinen als durchgehender Balken.",
+      "Monat wechseln: Pfeile oben oder über das Raster wischen. Tippen auf den Monat springt zu heute. Beim Öffnen des Kalenders ist immer heute gewählt.",
+      "Tippen auf einen Tag zeigt seine Termine, + Termin legt einen neuen Termin für diesen Tag an.",
+      "Erinnerungen: Zeitpunkte antippen oder unter \"Eigene\" einen eigenen Wert hinzufügen. Sie kommen nur an die Personen, für die der Termin gilt, bei ganztägigen Terminen um 8 Uhr.",
+      "Trägt jemand einen neuen Termin ein, bekommt die andere Person eine Benachrichtigung.",
+      "Wiederkehrende Termine lassen sich für einen Zeitraum pausieren, z. B. in den Ferien. Beim Löschen lässt sich wählen: nur dieser Tag oder die ganze Serie.",
+      "Android: lange auf das App-Symbol drücken öffnet Abkürzungen für Neuer Termin, Kalender und Heute."
     ]);
     sec("Statistik", [
       "Farben: " + CFG.WALKERS.join(" und ") + " jeweils eigene Farbe, zusammen blau.",
@@ -1365,8 +1593,6 @@
     $("pooVal").textContent = sheetPoo ? "💩".repeat(Math.min(sheetPoo, 5)) + (sheetPoo > 5 ? " " + sheetPoo : "") : "keins";
     $("pooMinus").disabled = sheetPoo === 0;
     $("fDur").placeholder = "Ø " + avgDuration(editing.newSlot);
-    const rec = walks[key(editing.day, editing.slot)];
-
   }
   function openSheet(day, slot, exact) {
     const rec = walks[key(day, slot)];
@@ -1503,7 +1729,7 @@
     document.querySelectorAll(".tab").forEach((t) => {
       if (t.dataset.view === v) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
     });
-    if (!keepDay) viewDay = todayStr();
+    if (!keepDay) { viewDay = todayStr(); if (v === "cal") calGoToday(); }
     render();
     window.scrollTo(0, 0);
   }
@@ -1531,34 +1757,7 @@
       toast("Runde gelöscht");
     };
     $("addCare").onclick = () => openApSheet(null);
-    $("calPrev").onclick = () => { calMonth = addInterval(calMonth, -1, "m"); render(); };
-    $("calNextBtn").onclick = () => { calMonth = addInterval(calMonth, 1, "m"); render(); };
-    $("calMonthBtn").onclick = () => { calSel = calToday(); calMonth = calSel.slice(0, 8) + "01"; render(); };
-    $("calAdd").onclick = () => openEvSheet(null);
-    $("evClose").onclick = closeSheet;
-    $("evSheet").addEventListener("submit", (e) => { e.preventDefault(); submitEv(); });
-    $("evAllDay").onclick = () => {
-      evAllDay = !evAllDay;
-      evRemind = evAllDay ? [1440] : [60];
-      renderEvChips();
-    };
-    $("evRepeat").addEventListener("change", renderEvChips);
-    $("evLocation").addEventListener("input", renderEvChips);
-    $("evStartDate").addEventListener("change", () => { if ($("evEndDate").value < $("evStartDate").value) $("evEndDate").value = $("evStartDate").value; });
-    $("evStartTime").addEventListener("change", () => {
-      const [hh, mm] = $("evStartTime").value.split(":").map(Number);
-      if (!isNaN(hh) && $("evEndDate").value === $("evStartDate").value) $("evEndTime").value = pad(Math.min(23, hh + 1)) + ":" + pad(mm);
-    });
-    $("evDelete").onclick = () => {
-      const ev = items[evEditing];
-      const recurring = ev && ev.data.repeat && ev.data.repeat.freq && ev.data.repeat.freq !== "0";
-      if (recurring) { $("evActions").hidden = true; $("evDelChoice").hidden = false; return; }
-      if (!evDelArmed) { evDelArmed = true; $("evDelete").textContent = "Wirklich löschen?"; return; }
-      evDelete(true);
-    };
-    $("evDelOne").onclick = () => evDelete(false);
-    $("evDelAll").onclick = () => evDelete(true);
-    $("evDelCancel").onclick = () => { $("evActions").hidden = false; $("evDelChoice").hidden = true; };
+    bindCalendar();
     $("apType").addEventListener("change", (e) => applyTypeDefaults(e.target.value));
     $("apUnit").addEventListener("change", (e) => { $("apEvery").disabled = e.target.value === "0"; });
     $("apSheet").addEventListener("submit", (e) => { e.preventDefault(); submitApSheet(); });
@@ -1589,24 +1788,44 @@
       if (document.visibilityState !== "visible") return;
       const t = todayStr();
       if (viewDay === lastToday && view === "today") viewDay = t;
+      // nach längerer Abwesenheit startet der Kalender wieder bei heute
+      if (view === "cal" && $("evSheet").hidden && Date.now() - hiddenAt > 10 * 60000) calGoToday();
       lastToday = t;
       render();
       schedulePull();
     });
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") hiddenAt = Date.now(); });
     setInterval(() => {
       document.querySelectorAll("[data-run]").forEach((el) => {
         el.textContent = clock(activeSec({ started_at: el.dataset.start, pause_sec: Number(el.dataset.pause), paused_at: el.dataset.paused || null }));
       });
     }, 1000);
-    setInterval(() => { if (document.visibilityState === "visible") pull(); }, 60000);
+    setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      // Tageswechsel um 4 Uhr auch bei dauerhaft geöffneter App mitnehmen
+      const t = todayStr();
+      if (t !== lastToday) { if (viewDay === lastToday) viewDay = t; lastToday = t; render(); }
+      pull();
+    }, 60000);
   }
 
   // ---------- Start ----------
   if (DEMO) seedDemo();
   bind();
-  if (location.hash === "#care") setView("care");
-  else if (location.hash === "#cal") setView("cal");
-  else render();
+  // Sprungziele für Benachrichtigungen und App-Verknüpfungen (lange auf das App-Symbol drücken)
+  function routeHash() {
+    const hsh = location.hash;
+    if (!hsh) return false;
+    if (hsh === "#care") setView("care");
+    else if (hsh === "#cal") setView("cal");
+    else if (hsh === "#today") setView("today");
+    else if (hsh === "#new-event") { setView("cal"); openEvSheet(null, null, calToday()); }
+    else return false;
+    window.history.replaceState(null, "", location.pathname + location.search);
+    return true;
+  }
+  window.addEventListener("hashchange", routeHash);
+  if (!routeHash()) render();
   refreshPush().then(() => { if (view === "settings") renderSettings(); });
   if (HAS_DB) initDb();
 })();
