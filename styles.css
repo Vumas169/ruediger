@@ -387,3 +387,19 @@ label.daylabel { display: grid; margin: 0; font-size: inherit; font-weight: 400;
 .stattable td small { font-size: 10.5px; }
 .stattable th:first-child { width: 25%; }
 .stattable td:last-child, .stattable thead th:last-child { padding-right: 10px; }
+
+/* Kompakter Kopf auf allen Reitern außer Heute */
+.panel.compact { padding-bottom: 14px; border-radius: 0 0 20px 20px; gap: 4px; }
+.viewtitle { margin: 0; font-family: var(--font-display); font-weight: 800; font-size: 24px; text-align: center; }
+.status:empty, .status[hidden] { display: none; }
+.carehead { justify-content: flex-end; }
+
+/* Info unter Optionen */
+.info { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 4px 14px; }
+.info summary { cursor: pointer; font-family: var(--font-display); font-weight: 600; font-size: 17px; padding: 10px 0; list-style-position: inside; }
+.info h3 { font-size: 14px; margin: 14px 0 4px; color: var(--ink); }
+.info ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+.info p.legend { margin: 12px 0; }
+.scorewrap { width: 138px; }
+.points { font-size: 36px; }
+.panel { padding-bottom: 14px; }

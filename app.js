@@ -4,7 +4,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "9 vom 03.10.2026";
+  const APP_VERSION = "10 vom 03.10.2026";
 
   // ---------- Einstellungen ----------
   const CFG = Object.assign({
@@ -422,7 +422,7 @@
     saveRec({ day, slot, walkers: [me], started_at: start.toISOString(),
       ended_at: new Date(start.getTime() + dur * 60000).toISOString(),
       duration_min: dur, estimated: true, poo: 0, note: "", paused_at: null, pause_sec: 0 });
-    toast(ROUNDS[slot - 1].name + " eingetragen: " + hm(start.toISOString()) + " Uhr, " + dur + " min. Antippen zum Ändern.");
+    toast(ROUNDS[slot - 1].name + " eingetragen: " + hm(start.toISOString()) + " Uhr, " + dur + " min");
   }
   function addPoo(rec) { saveRec({ ...rec, poo: (rec.poo || 0) + 1 }); }
   function toggleTogether(rec) {
@@ -602,7 +602,7 @@
       if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
       const { error } = await sb.from("push_subs").upsert({ endpoint: sub.endpoint, sub: sub.toJSON(), walker: me });
       if (error) throw new Error("Anmeldung des Handys hat nicht geklappt: " + error.message);
-      pushState.msg = "Eingeschaltet. Erinnerungen kommen jetzt als Benachrichtigung.";
+      pushState.msg = "";
     } catch (e) {
       pushState.msg = (e && e.message) || String(e);
     }
@@ -619,7 +619,7 @@
         await sb.from("push_subs").delete().eq("endpoint", sub.endpoint);
         await sub.unsubscribe();
       }
-      pushState.msg = "Ausgeschaltet. Dieses Handy bekommt keine Benachrichtigungen mehr.";
+      pushState.msg = "";
     } catch (e) { pushState.msg = (e && e.message) || String(e); }
     pushState.busy = false;
     await refreshPush();
@@ -632,7 +632,7 @@
       const sub = await reg.pushManager.getSubscription();
       if (!sub) throw new Error("Dieses Handy ist nicht angemeldet.");
       const r = await pushCall({ action: "test", endpoint: sub.endpoint });
-      pushState.msg = r && r.ok ? "Test verschickt. Die Benachrichtigung sollte gleich erscheinen." : "Test hat nicht geklappt" + (r && r.error ? ": " + r.error : ".");
+      pushState.msg = r && r.ok ? "Test verschickt." : "Test hat nicht geklappt" + (r && r.error ? ": " + r.error : ".");
     } catch (e) { pushState.msg = (e && e.message) || String(e); }
     pushState.busy = false;
     renderSettings();
@@ -644,19 +644,17 @@
     if (!session) { info.textContent = "Erst anmelden."; return; }
     if (!pushState.supported) {
       info.textContent = isIos() && !isStandalone()
-        ? "Auf dem iPhone gehen Benachrichtigungen nur in der App vom Home-Bildschirm (ab iOS 16.4). Bitte die App über das Pfoten-Symbol öffnen."
+        ? "Auf dem iPhone nur in der App vom Home-Bildschirm (ab iOS 16.4)."
         : "Dieser Browser unterstützt keine Benachrichtigungen.";
       return;
     }
-    let t = pushState.on
-      ? "An. Dieses Handy bekommt die Termin-Erinnerungen als Benachrichtigung, zu den Zeitpunkten, die beim jeweiligen Termin eingestellt sind (ohne Uhrzeit um 8 Uhr)."
-      : "Aus. Einschalten, damit Termin-Erinnerungen als Benachrichtigung kommen, auch wenn die App geschlossen ist.";
-    if (Notification.permission === "denied") t = "Benachrichtigungen sind für diese App in den Handy-Einstellungen gesperrt. Dort erlauben, dann hier einschalten.";
+    let t = pushState.on ? "An für dieses Handy." : "Aus für dieses Handy.";
+    if (Notification.permission === "denied") t = "In den Handy-Einstellungen für diese App gesperrt. Dort erlauben, dann hier einschalten.";
     if (pushState.msg) t += " " + pushState.msg;
     info.textContent = t;
     tog.hidden = false;
     tog.disabled = pushState.busy;
-    tog.textContent = pushState.on ? "Auf diesem Handy ausschalten" : "Auf diesem Handy einschalten";
+    tog.textContent = pushState.on ? "Ausschalten" : "Einschalten";
     tog.className = "btn " + (pushState.on ? "ghost" : "primary");
     test.hidden = !pushState.on;
     test.disabled = pushState.busy;
@@ -673,8 +671,15 @@
     if (view === "settings") renderSettings();
   }
 
+  const VIEW_TITLES = { history: "Verlauf", stats: "Statistik", care: "Rüdigers Termine", settings: "Optionen" };
   function renderHeader() {
     const t = todayStr();
+    const compact = view !== "today";
+    document.querySelector(".panel").classList.toggle("compact", compact);
+    $("viewTitle").hidden = !compact;
+    $("viewTitle").textContent = VIEW_TITLES[view] || "";
+    document.querySelector(".daynav").hidden = compact;
+    document.querySelector(".scorewrap").hidden = compact;
     $("dayEyebrow").textContent = viewDay === t ? "Heute" : viewDay === addDays(t, -1) ? "Gestern" : "Nachtragen";
     $("dayDate").textContent = fmtDateShort(viewDay);
     $("pickDay").max = t;
@@ -697,12 +702,12 @@
 
     const st = $("status");
     let msg = "", warn = false;
-    if (DEMO) { msg = "Testmodus: Daten bleiben auf diesem Gerät"; warn = true; }
-    else if (!navigator.onLine) { msg = "Offline. Wird später abgeglichen"; warn = true; }
-    else if (syncError) { msg = "Abgleich hat nicht geklappt. Details unter Optionen"; warn = true; }
-    else if (pending.length) msg = pending.length === 1 ? "1 Änderung wird abgeglichen" : pending.length + " Änderungen werden abgeglichen";
-    else if (lastSync) msg = "Abgeglichen um " + hm(lastSync) + " Uhr";
+    // Nur melden, wenn etwas nicht stimmt
+    if (DEMO) { msg = "Testmodus"; warn = true; }
+    else if (!navigator.onLine) { msg = "Offline, wird später abgeglichen"; warn = true; }
+    else if (syncError) { msg = "Abgleich hat nicht geklappt"; warn = true; }
     st.textContent = msg;
+    st.hidden = !msg;
     st.classList.toggle("warn", warn);
   }
 
@@ -880,8 +885,7 @@
       card.style.borderLeftColor = walkerColor(w);
       tb.append(card);
     }
-    tb.append(h("p", { class: "legend" }, "Insgesamt " + fmtHM(s.total.mins) + ", davon " + fmtHM(s.total.togetherMins) +
-      " zusammen. Gemeinsame Runden zählen bei beiden."));
+    tb.append(h("p", { class: "legend" }, "Insgesamt " + fmtHM(s.total.mins) + ", davon " + fmtHM(s.total.togetherMins) + " zusammen."));
 
     // 2. Anzahl Runden
     const rb = $("roundsBlock");
@@ -987,24 +991,48 @@
       chips.append(b);
     }
     let info;
-    if (DEMO) info = "Keine Datenbank eingetragen (config.js). Die App läuft im Testmodus.";
+    if (DEMO) info = "Testmodus ohne Datenbank.";
     else if (!session) info = "Nicht angemeldet.";
     else {
-      info = "Angemeldet als " + ((session.user && session.user.email) || "unbekannt") + ". ";
-      info += lastSync ? "Zuletzt abgeglichen um " + hm(lastSync) + " Uhr." : "Noch nicht abgeglichen.";
-      if (pending.length) info += " " + pending.length + " Änderung(en) warten.";
-      if (syncError) info += " Letzter Fehler: " + syncError;
+      info = (session.user && session.user.email) || "Angemeldet";
+      info += lastSync ? " · abgeglichen " + hm(lastSync) + " Uhr" : "";
+      if (pending.length) info += " · " + pending.length + " offen";
+      if (syncError) info += " · Fehler: " + syncError;
     }
+    info += " · Version " + APP_VERSION;
     $("syncInfo").textContent = info;
     $("syncNow").hidden = DEMO;
     $("logout").hidden = DEMO || !session;
     $("demoBlock").hidden = !DEMO;
     renderPush();
-    $("versionInfo").textContent = "Version " + APP_VERSION + ". Neue Versionen werden beim Öffnen automatisch geladen.";
-    $("rulesInfo").textContent =
-      "Der Gassi-Tag läuft von " + CFG.DAY_START_HOUR + ":00 bis " + CFG.DAY_START_HOUR + ":00 Uhr, eine Runde um 0:30 Uhr zählt also zum Vortag. " +
-      "Erledigt und Ø nehmen die durchschnittliche Dauer derselben Runde aus den letzten 30 Tagen. Gibt es dafür noch keine Werte, sind es " + CFG.DEFAULT_MINUTES + " Minuten. " +
-      "Pausen zählen nicht zur Dauer. Gemeinsame Runden zählen in der Statistik bei beiden.";
+    renderInfo();
+  }
+
+  // Alle Erklärungen gesammelt an einer Stelle
+  function renderInfo() {
+    const body = $("infoBody");
+    if (body.childElementCount) return;
+    const sec = (title, lines) => body.append(h("h3", {}, title), h("ul", {}, ...lines.map((l) => h("li", {}, l))));
+    sec("Runden", [
+      "Der Gassi-Tag läuft von " + CFG.DAY_START_HOUR + ":00 bis " + CFG.DAY_START_HOUR + ":00 Uhr. Eine Runde um 0:30 Uhr zählt zum Vortag.",
+      "▶ startet die Zeitmessung, ⏸ pausiert. Pausen zählen nicht zur Dauer.",
+      "Erledigt bzw. Ø trägt eine Runde mit der Durchschnittsdauer genau dieser Runde aus den letzten 30 Tagen ein, ohne Werte mit " + CFG.DEFAULT_MINUTES + " Minuten. Solche Einträge sind mit \"ca.\" markiert und zählen nicht für spätere Durchschnitte.",
+      "👥 heißt zusammen gegangen. Im Formular lassen sich auch beide oder nur die andere Person auswählen.",
+      "💩 zählt bei jedem Antippen ein Häufchen dazu, auch während der Runde. Korrigieren über die Runde.",
+      "Frühere Tage: Pfeile oben oder auf das Datum tippen. Jede Runde lässt sich antippen und korrigieren oder löschen."
+    ]);
+    sec("Statistik", [
+      "Farben: " + CFG.WALKERS.join(" und ") + " jeweils eigene Farbe, zusammen blau.",
+      "Gemeinsame Runden zählen bei beiden Personen, in der Gesamtsumme nur einmal.",
+      "Im Kalender unter Verlauf gilt: je kräftiger die Farbe, desto mehr Runden."
+    ]);
+    sec("Termine", [
+      "Unter Heute erscheinen Termine, die in weniger als einer Woche fällig oder überfällig sind.",
+      "✓ hakt ab. Wiederkehrende Termine springen auf den nächsten Termin, gerechnet ab dem Tag des Abhakens.",
+      "Benachrichtigungen kommen zu den beim Termin gewählten Zeitpunkten, bei Terminen ohne Uhrzeit um 8 Uhr."
+    ]);
+    sec("Übliche Abstände", CARE_TYPES.filter((t) => t.hint).map((t) => t.name + ": " + t.hint));
+    body.append(h("p", { class: "legend" }, "Die Abstände sind Richtwerte. Im Zweifel mit dem Tierarzt abstimmen."));
   }
 
   // ---------- Runde bearbeiten ----------
@@ -1035,9 +1063,7 @@
     $("pooMinus").disabled = sheetPoo === 0;
     $("fDur").placeholder = "Ø " + avgDuration(editing.newSlot);
     const rec = walks[key(editing.day, editing.slot)];
-    $("durHint").textContent = isRunning(rec)
-      ? "Die Runde läuft noch. Jetzt beenden stoppt die Zeit, Pausen werden abgezogen."
-      : "Dauer leer lassen = Ø dieser Runde (" + avgDuration(editing.newSlot) + " min).";
+
   }
   function openSheet(day, slot, exact) {
     const rec = walks[key(day, slot)];
@@ -1110,7 +1136,6 @@
   }
   function applyTypeDefaults(typeId, keepName) {
     const t = careType(typeId);
-    $("apTypeHint").textContent = t.hint;
     if (!keepName) $("apName").value = "";
     $("apName").placeholder = t.id === "custom" ? "z. B. Hundefriseur" : t.name + " (optional genauer, z. B. Mittel)";
     $("apEvery").value = t.every || 1;
@@ -1128,7 +1153,6 @@
     if (ap) {
       const d = ap.data;
       sel.value = careType(d.type).id;
-      $("apTypeHint").textContent = careType(d.type).hint;
       $("apName").value = d.name || "";
       $("apDate").value = d.due;
       $("apTime").value = d.time || "";

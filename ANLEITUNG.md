@@ -117,4 +117,4 @@ Hinweise:
 - Verlauf: Minuten der letzten 7 Tage nach Person, Kalender der letzten 4 Wochen. Tippen öffnet den Tag.
 - Statistik: wer wie oft gegangen ist (3 Tage, 7 Tage, 30 Tage, gesamt), Ø Dauer je Runde.
 - Termine: Rüdigers Behandlungen und Termine.
-- Optionen: wer auf diesem Handy unterwegs ist, Abgleich, Version.
+- Optionen: wer auf diesem Handy unterwegs ist, Benachrichtigungen, "So funktioniert die App" mit allen Erklärungen, Konto und Version.

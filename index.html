@@ -21,6 +21,7 @@
 <!--APP-->
 <div id="app">
   <header class="panel">
+    <h1 class="viewtitle" id="viewTitle" hidden></h1>
     <div class="daynav">
       <button class="iconbtn" id="prevDay" aria-label="Vorheriger Tag">‹</button>
       <label class="daylabel" for="pickDay">
@@ -56,7 +57,6 @@
       <div class="block">
         <h2>Runden pro Tag <span class="sub">letzte 4 Wochen</span></h2>
         <div class="grid4" id="grid4"></div>
-        <p class="legend">Je kräftiger die Farbe, desto mehr Runden. Tippen auf einen Tag öffnet ihn.</p>
       </div>
     </section>
 
@@ -67,19 +67,17 @@
       <div class="block" id="slotBlock"></div>
       <div class="block" id="factsBlock"></div>
       <div class="block">
-        <h2>Im Vergleich <span class="sub">h = Stunden</span></h2>
+        <h2>Im Vergleich</h2>
         <div class="tablewrap"><table class="stattable" id="statTable"></table></div>
       </div>
       <div class="block">
         <h2>Ø Dauer je Runde <span class="sub">letzte 30 Tage</span></h2>
         <div id="avgList"></div>
-        <p class="legend">Diese Werte nimmt "Erledigt", wenn eine Runde nachgetragen wird.</p>
       </div>
     </section>
 
     <section id="view-care" class="view" hidden>
       <div class="carehead">
-        <h2>Rüdigers Termine</h2>
         <button type="button" class="btn small primary" id="addCare">+ Termin</button>
       </div>
       <ol class="carelist" id="careList"></ol>
@@ -92,37 +90,34 @@
       <div class="block">
         <h2>Auf diesem Handy bin ich</h2>
         <div class="chips" id="meChips"></div>
-        <p class="legend">Wird beim Anmelden automatisch gesetzt und an deinem Konto gespeichert. Neue Runden laufen auf diese Person.</p>
       </div>
       <div class="block">
         <h2>Benachrichtigungen</h2>
         <p class="legend" id="pushInfo"></p>
         <div class="row">
-          <button class="btn primary" id="pushToggle" hidden>Auf diesem Handy einschalten</button>
+          <button class="btn primary" id="pushToggle" hidden>Einschalten</button>
           <button class="btn ghost" id="pushTest" hidden>Test senden</button>
-        </div>
-      </div>
-      <div class="block">
-        <h2>Abgleich</h2>
-        <p id="syncInfo" class="legend"></p>
-        <div class="row">
-          <button class="btn ghost" id="syncNow">Jetzt abgleichen</button>
-          <button class="btn ghost" id="logout" hidden>Abmelden</button>
         </div>
       </div>
       <div class="block" id="demoBlock" hidden>
         <h2>Testmodus</h2>
-        <p class="legend">Die App läuft ohne Datenbank. Alles bleibt auf diesem Gerät.</p>
+        <p class="legend">Ohne Datenbank, alles bleibt auf diesem Gerät.</p>
         <button class="btn ghost" id="clearDemo">Beispieldaten löschen</button>
       </div>
       <div class="block">
-        <h2>So zählt die App</h2>
-        <p class="legend" id="rulesInfo"></p>
+        <details class="info" id="infoBox">
+          <summary>So funktioniert die App</summary>
+          <div id="infoBody"></div>
+        </details>
       </div>
       <div class="block">
-        <h2>Version</h2>
-        <p class="legend" id="versionInfo"></p>
-        <button class="btn ghost" id="reloadApp">App neu laden</button>
+        <h2>Konto und App</h2>
+        <p class="legend" id="syncInfo"></p>
+        <div class="row">
+          <button class="btn ghost" id="syncNow">Abgleichen</button>
+          <button class="btn ghost" id="reloadApp">Neu laden</button>
+          <button class="btn ghost" id="logout" hidden>Abmelden</button>
+        </div>
       </div>
     </section>
   </main>
@@ -160,7 +155,7 @@
   <p class="legend" id="sheetSub"></p>
   <label>Runde</label>
   <div class="chips" id="slotChips"></div>
-  <label>Wer war dabei? <span class="labelnote">Mehrere antippen = zusammen gegangen</span></label>
+  <label>Wer war dabei?</label>
   <div class="chips" id="walkerChips"></div>
   <div class="two">
     <div>
@@ -172,7 +167,6 @@
       <input id="fDur" type="number" inputmode="numeric" min="1" max="300">
     </div>
   </div>
-  <p class="legend" id="durHint"></p>
   <label>Häufchen</label>
   <div class="chips">
     <div class="poocount">
@@ -197,7 +191,6 @@
   </div>
   <label for="apType">Art</label>
   <select id="apType"></select>
-  <p class="legend" id="apTypeHint"></p>
   <label for="apName">Bezeichnung</label>
   <input id="apName" type="text" maxlength="60" placeholder="z. B. Bravecto, Tierarzt Dr. Müller">
   <div class="two">
