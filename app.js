@@ -4,7 +4,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "8 vom 03.10.2026";
+  const APP_VERSION = "8.1 vom 03.10.2026";
 
   // ---------- Einstellungen ----------
   const CFG = Object.assign({
@@ -460,8 +460,8 @@
     }
     if (d.note) L.push("DESCRIPTION:" + esc(d.note));
     for (const days of d.remind || []) {
-      // Ganztägig: Erinnerung um 9 Uhr am jeweiligen Tag
-      const trig = d.time ? (days ? "-P" + days + "D" : "-PT1H") : (days ? "-P" + (days - 1) + "DT15H" : "PT9H");
+      // Ganztägig: Erinnerung um 8 Uhr am jeweiligen Tag
+      const trig = d.time ? (days ? "-P" + days + "D" : "-PT1H") : (days ? "-P" + (days - 1) + "DT16H" : "PT8H");
       L.push("BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:" + esc(apTitle(ap)), "TRIGGER:" + trig, "END:VALARM");
     }
     L.push("END:VEVENT", "END:VCALENDAR");
@@ -649,7 +649,7 @@
       return;
     }
     let t = pushState.on
-      ? "An. Dieses Handy bekommt die Termin-Erinnerungen als Benachrichtigung, zu den Zeitpunkten, die beim jeweiligen Termin eingestellt sind."
+      ? "An. Dieses Handy bekommt die Termin-Erinnerungen als Benachrichtigung, zu den Zeitpunkten, die beim jeweiligen Termin eingestellt sind (ohne Uhrzeit um 8 Uhr)."
       : "Aus. Einschalten, damit Termin-Erinnerungen als Benachrichtigung kommen, auch wenn die App geschlossen ist.";
     if (Notification.permission === "denied") t = "Benachrichtigungen sind für diese App in den Handy-Einstellungen gesperrt. Dort erlauben, dann hier einschalten.";
     if (pushState.msg) t += " " + pushState.msg;

@@ -108,7 +108,7 @@ Einrichtung (einmalig):
 
 Hinweise:
 - iPhone: nur in der App vom Home-Bildschirm, ab iOS 16.4.
-- Erinnerungen kommen zu den beim Termin eingestellten Zeitpunkten, bei Terminen ohne Uhrzeit um 9 Uhr.
+- Erinnerungen kommen zu den beim Termin eingestellten Zeitpunkten, bei Terminen ohne Uhrzeit um 8 Uhr. Für jeden gewählten Zeitpunkt (1 Woche, 3 Tage, 1 Tag vorher, am Tag) kommt eine eigene Benachrichtigung.
 - Ausschalten pro Handy unter Optionen.
 
 ## Reiter

@@ -86,7 +86,7 @@ async function runReminders() {
     const d = ap.data || {};
     if (d.archived || !d.due) continue;
     for (const off of (d.remind || []) as number[]) {
-      const moment = `${addDays(d.due, -off)}T${d.time || "09:00"}`;
+      const moment = `${addDays(d.due, -off)}T${d.time || "08:00"}`;
       if (moment > nowL || moment < lowL) continue;
       const key = `${ap.id}|${d.due}|${off}`;
       const ins = await sb.from("push_log").upsert({ key }, { onConflict: "key", ignoreDuplicates: true }).select();
