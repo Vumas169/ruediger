@@ -4,7 +4,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "10 vom 03.10.2026";
+  const APP_VERSION = "0.5 vom 03.10.2026";
 
   // ---------- Einstellungen ----------
   const CFG = Object.assign({
@@ -680,6 +680,7 @@
     $("viewTitle").textContent = VIEW_TITLES[view] || "";
     document.querySelector(".daynav").hidden = compact;
     document.querySelector(".scorewrap").hidden = compact;
+    $("roundsOf").hidden = compact;
     $("dayEyebrow").textContent = viewDay === t ? "Heute" : viewDay === addDays(t, -1) ? "Gestern" : "Nachtragen";
     $("dayDate").textContent = fmtDateShort(viewDay);
     $("pickDay").max = t;
@@ -687,7 +688,7 @@
     $("nextDay").disabled = viewDay >= t;
     const ds = dayStats(viewDay);
     $("points").textContent = String(ds.mins);
-    $("pointsOf").textContent = "Minuten draußen";
+    $("pointsOf").textContent = "Min. draußen";
     $("roundsOf").textContent = ds.rounds + " von " + NR + " Runden";
 
     const C = 2 * Math.PI * 50, gap = 17, len = C / NR;

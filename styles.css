@@ -403,3 +403,9 @@ label.daylabel { display: grid; margin: 0; font-size: inherit; font-weight: 400;
 .scorewrap { width: 138px; }
 .points { font-size: 36px; }
 .panel { padding-bottom: 14px; }
+
+/* Ring: im Kreis nur die Minuten, Runden darunter */
+.scorewrap { width: 156px; }
+.points { font-size: 38px; }
+.pointsof { font-size: 12px; }
+.roundsof { margin: -2px 0 0; text-align: center; font-size: 14px; color: var(--panel-muted); }
