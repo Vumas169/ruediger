@@ -4,7 +4,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "8.1 vom 03.10.2026";
+  const APP_VERSION = "9 vom 03.10.2026";
 
   // ---------- Einstellungen ----------
   const CFG = Object.assign({
@@ -798,23 +798,55 @@
     }
   }
 
+  // Dauer lesbar: unter einer Stunde in Minuten, sonst in Stunden mit einer Nachkommastelle
+  function fmtHours(mins) {
+    if (mins < 60) return { num: String(mins), unit: "Min." };
+    return { num: (Math.round(mins / 6) / 10).toLocaleString("de-DE"), unit: "Std." };
+  }
+  const fmtDur = (mins) => { const f = fmtHours(mins); return f.num + " " + f.unit; };
+  function fmtHM(mins) {
+    const hh = Math.floor(mins / 60), mm = mins % 60;
+    return hh ? hh + " Std. " + (mm ? mm + " Min." : "") : mm + " Min.";
+  }
+  const startOffset = (iso) => { const d = new Date(iso); return ((d.getHours() - CFG.DAY_START_HOUR + 24) % 24) * 60 + d.getMinutes(); };
+
+  // Gemeinsame Runden zählen bei jeder beteiligten Person voll, bei "Alle Runden" nur einmal.
   function periodStats(p) {
     const t = todayStr();
     const from = p.days ? addDays(t, -(p.days - 1)) : null;
-    const by = Object.fromEntries(CFG.WALKERS.map((w) => [w, { rounds: 0, mins: 0, poo: 0, together: 0 }]));
-    const total = { rounds: 0, mins: 0, poo: 0, together: 0 };
-    let first = null;
+    const by = Object.fromEntries(CFG.WALKERS.map((w) => [w, { rounds: 0, mins: 0, together: 0, togetherMins: 0 }]));
+    const total = { rounds: 0, mins: 0, together: 0, togetherMins: 0 };
+    const slots = ROUNDS.map(() => Object.fromEntries([...CFG.WALKERS, TOGETHER].map((w) => [w, 0])));
+    let first = null, longest = null, earliest = null, latest = null;
     for (const r of Object.values(walks)) {
       if (!isDone(r) || r.day > t || (from && r.day < from)) continue;
       const m = minutesOf(r);
-      total.rounds++; total.mins += m; total.poo += r.poo || 0; if (isTogether(r)) total.together++;
+      total.rounds++; total.mins += m;
+      if (isTogether(r)) { total.together++; total.togetherMins += m; }
       if (!first || r.day < first) first = r.day;
       for (const w of r.walkers) {
         if (!(w in by)) continue;
-        by[w].rounds++; by[w].mins += m; by[w].poo += r.poo || 0; if (isTogether(r)) by[w].together++;
+        by[w].rounds++; by[w].mins += m;
+        if (isTogether(r)) { by[w].together++; by[w].togetherMins += m; }
+      }
+      const ck = recColorKey(r);
+      if (slots[r.slot - 1] && ck in slots[r.slot - 1]) slots[r.slot - 1][ck]++;
+      if (!r.estimated) {
+        if (!longest || m > minutesOf(longest)) longest = r;
+        if (r.started_at) {
+          const o = startOffset(r.started_at);
+          if (!earliest || o < startOffset(earliest.started_at)) earliest = r;
+          if (!latest || o > startOffset(latest.started_at)) latest = r;
+        }
       }
     }
-    return { by, total, first };
+    const days = p.days || (first ? daysBetween(first, t) + 1 : 0);
+    return { by, total, first, slots, longest, earliest, latest, days };
+  }
+
+  function bigFig(mins) {
+    const f = fmtHours(mins);
+    return h("span", { class: "fig" }, h("b", {}, f.num), h("span", {}, " " + f.unit));
   }
 
   function renderStats() {
@@ -828,45 +860,99 @@
     }
     const p = PERIODS.find((x) => x.id === period) || PERIODS[1];
     const s = periodStats(p);
-
-    const wb = $("whoBlock");
-    wb.textContent = "";
     const span = p.days ? "letzte " + p.days + " Tage inkl. heute" : (s.first ? "seit " + fmtDay(s.first) : "noch keine Runden");
-    wb.append(h("h2", {}, "Wer war wie oft draußen? ", h("span", { class: "sub" }, span)));
+
+    // 1. Zeit draußen
+    const tb = $("timeBlock");
+    tb.textContent = "";
+    tb.append(h("h2", {}, "Zeit draußen ", h("span", { class: "sub" }, span)));
+    const maxM = Math.max(1, ...Object.values(s.by).map((x) => x.mins));
+    for (const w of CFG.WALKERS) {
+      const x = s.by[w];
+      const share = s.total.mins ? Math.round(x.mins / s.total.mins * 100) : 0;
+      const fill = h("div", { class: "fill" });
+      fill.style.width = (x.mins / maxM * 100) + "%";
+      fill.style.background = walkerColor(w);
+      const card = h("div", { class: "whocard" },
+        h("div", { class: "whohead" }, h("span", { class: "whoname" }, w), bigFig(x.mins)),
+        h("div", { class: "track" }, fill),
+        h("div", { class: "whometa" }, "bei " + share + " % der Zeit dabei · Ø " + (x.rounds ? Math.round(x.mins / x.rounds) : 0) + " Min. pro Runde"));
+      card.style.borderLeftColor = walkerColor(w);
+      tb.append(card);
+    }
+    tb.append(h("p", { class: "legend" }, "Insgesamt " + fmtHM(s.total.mins) + ", davon " + fmtHM(s.total.togetherMins) +
+      " zusammen. Gemeinsame Runden zählen bei beiden."));
+
+    // 2. Anzahl Runden
+    const rb = $("roundsBlock");
+    rb.textContent = "";
+    rb.append(h("h2", {}, "Runden"));
     const maxR = Math.max(1, ...Object.values(s.by).map((x) => x.rounds));
     for (const w of CFG.WALKERS) {
       const x = s.by[w];
-      const share = s.total.rounds ? Math.round(x.rounds / s.total.rounds * 100) : 0;
       const fill = h("div", { class: "fill" });
       fill.style.width = (x.rounds / maxR * 100) + "%";
       fill.style.background = walkerColor(w);
-      const card = h("div", { class: "whocard" },
-        h("div", { class: "whohead" }, h("span", { class: "whoname" }, w), h("span", { class: "whobig" }, String(x.rounds)),
-          h("span", { class: "whounit" }, x.rounds === 1 ? "Runde" : "Runden")),
-        h("div", { class: "track" }, fill),
-        h("div", { class: "whometa" }, "bei " + share + " % aller Runden dabei · davon " + x.together + " zusammen · " + fmtNum(x.mins) + " min · " + x.poo + " 💩"));
-      card.style.borderLeftColor = walkerColor(w);
-      wb.append(card);
+      rb.append(h("div", { class: "who" }, h("span", {}, w), h("div", { class: "track" }, fill), h("b", {}, String(x.rounds))));
     }
-    wb.append(h("p", { class: "legend" }, "Alle Runden: " + s.total.rounds + ", davon " + s.total.together + " zusammen. " +
-      fmtNum(s.total.mins) + " Minuten, " + s.total.poo + " Häufchen. Gemeinsame Runden zählen bei beiden."));
+    rb.append(h("p", { class: "legend" }, "Alle Runden: " + s.total.rounds + ", davon " + s.total.together + " zusammen."));
 
+    // 3. Wer geht welche Runde?
+    const sl = $("slotBlock");
+    sl.textContent = "";
+    sl.append(h("h2", {}, "Wer geht welche Runde?"));
+    const cats = [...CFG.WALKERS, TOGETHER];
+    ROUNDS.forEach((r, i) => {
+      const c = s.slots[i];
+      const sum = cats.reduce((a, k) => a + c[k], 0);
+      const bar = h("div", { class: "splitbar" });
+      for (const k of cats) {
+        if (!c[k]) continue;
+        const part = h("div", { class: "part", title: k + ": " + c[k] }, String(c[k]));
+        part.style.flexGrow = String(c[k]);
+        part.style.background = walkerColor(k);
+        part.style.color = walkerInk(k);
+        bar.append(part);
+      }
+      if (!sum) bar.append(h("div", { class: "part none" }, "–"));
+      sl.append(h("div", { class: "splitrow" }, h("span", {}, r.name), bar));
+    });
+    const keys = h("div", { class: "keys" });
+    for (const k of cats) { const dot = h("span", { class: "dot" }); dot.style.background = walkerColor(k); keys.append(h("span", { class: "keyitem" }, dot, k)); }
+    sl.append(keys);
+
+    // 4. Rekorde und Durchschnitte
+    const fb = $("factsBlock");
+    fb.textContent = "";
+    fb.append(h("h2", {}, "Rekorde"));
+    const grid = h("div", { class: "facts" });
+    const fact = (label, value, detail) => grid.append(h("div", { class: "fact" }, h("span", { class: "flabel" }, label), h("b", {}, value), h("span", { class: "fdetail" }, detail || "")));
+    const who = (r) => r ? whoText(r) + " · " + fmtDM(r.day) : "";
+    fact("Ø pro Tag draußen", s.days ? fmtHM(Math.round(s.total.mins / s.days)) : "–", s.days ? "über " + s.days + (s.days === 1 ? " Tag" : " Tage") : "");
+    fact("Längste Runde", s.longest ? fmtHM(minutesOf(s.longest)) : "–", who(s.longest));
+    fact("Frühester Start", s.earliest ? hm(s.earliest.started_at) + " Uhr" : "–", who(s.earliest));
+    fact("Spätester Start", s.latest ? hm(s.latest.started_at) + " Uhr" : "–", who(s.latest));
+    fb.append(grid);
+
+    // 5. Alle Zeiträume im Vergleich
     const tbl = $("statTable");
     tbl.textContent = "";
     const all = PERIODS.map(periodStats);
     tbl.append(h("thead", {}, h("tr", {}, h("th", {}, ""), ...PERIODS.map((x) => h("th", { scope: "col" }, x.label)))));
-    const tb = h("tbody");
-    const cell = (v) => h("td", {}, h("b", {}, String(v.rounds)), h("small", {}, fmtNum(v.mins) + " min"));
-    for (const w of CFG.WALKERS) tb.append(h("tr", {}, h("th", { scope: "row" }, w), ...all.map((x) => cell(x.by[w]))));
-    tb.append(h("tr", { class: "sum" }, h("th", { scope: "row" }, "Alle Runden"), ...all.map((x) => cell(x.total))));
-    tbl.append(tb);
+    const body = h("tbody");
+    const cell = (v) => h("td", {}, h("b", {}, v.mins < 60 ? v.mins + " min" : (Math.round(v.mins / 6) / 10).toLocaleString("de-DE") + " h"),
+      h("small", {}, v.rounds + (v.rounds === 1 ? " Runde" : " Runden")));
+    for (const w of CFG.WALKERS) body.append(h("tr", {}, h("th", { scope: "row" }, w), ...all.map((x) => cell(x.by[w]))));
+    body.append(h("tr", { class: "sum" }, h("th", { scope: "row" }, "Alle"), ...all.map((x) => cell(x.total))));
+    tbl.append(body);
 
+    // 6. Durchschnitt je Runde (Grundlage für "Erledigt")
     const al = $("avgList");
     al.textContent = "";
     ROUNDS.forEach((r, i) => {
       const list = history(i + 1);
       al.append(h("div", { class: "avgrow" }, h("span", {}, r.name),
-        h("b", {}, "Ø " + avgDuration(i + 1) + " min"),
+        h("b", {}, "Ø " + avgDuration(i + 1) + " Min."),
         h("small", {}, list.length ? list.length + " gemessen · meist ab " + typicalStart(i + 1) + " Uhr" : "noch keine Werte, Vorgabe")));
     });
   }
