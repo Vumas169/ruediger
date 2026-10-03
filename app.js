@@ -4,7 +4,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "0.5 vom 03.10.2026";
+  const APP_VERSION = "0.6 vom 03.10.2026";
 
   // ---------- Einstellungen ----------
   const CFG = Object.assign({
@@ -63,7 +63,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* egal */ } }
   };
-  const P = DEMO ? "rr.demo5." : "rr.";
+  const P = DEMO ? "rr.demo6." : "rr.";
   let walks = ls.get(P + "walks", {});      // "YYYY-MM-DD|slot" -> Runde
   let items = ls.get(P + "items", {});      // id -> { id, kind, data, updated_at }
   let pending = ls.get(P + "pending", []);  // noch nicht abgeglichene Änderungen
@@ -389,6 +389,13 @@
       items[id] = { id, kind: "appointment", updated_at: new Date().toISOString(),
         data: { type, name: "", due: addDays(ct, inDays), time: "", every: c.every, unit: c.unit, remind, note: "", lastDone: null, history: [] } };
     });
+    const evs = [
+      { title: "Abendessen bei Schmidti", who: CFG.WALKERS.slice(), allDay: false, start: addDays(ct, 1) + "T19:00", end: addDays(ct, 1) + "T22:00", location: "Kastanienallee 12, Berlin", remind: [60] },
+      { title: "Zahnarzt", who: [CFG.WALKERS[1] || CFG.WALKERS[0]], allDay: false, start: addDays(ct, 3) + "T08:30", end: addDays(ct, 3) + "T09:30", location: "", remind: [1440] },
+      { title: "Fußball", who: [CFG.WALKERS[0]], allDay: false, start: ct + "T19:30", end: ct + "T21:00", location: "Sportplatz", remind: [60], repeat: { freq: "w", until: "" } },
+      { title: "Wochenende Ostsee", who: CFG.WALKERS.slice(), allDay: true, start: addDays(ct, 8) + "T00:00", end: addDays(ct, 10) + "T23:59", location: "Warnemünde", remind: [10080] }
+    ];
+    for (const e of evs) { const id = uid(); items[id] = { id, kind: "event", updated_at: new Date().toISOString(), data: { note: "", exdates: [], repeat: { freq: "0", until: "" }, ...e } }; }
     ls.set(P + "seeded", true);
     persist();
   }
@@ -660,24 +667,310 @@
     test.disabled = pushState.busy;
   }
 
+  // ---------- Kalender ----------
+  // Termine liegen als kind "event" in app_data. Zeiten als Ortszeit "YYYY-MM-DDTHH:MM".
+  let calMonth = calToday().slice(0, 8) + "01";
+  let calSel = calToday();
+  let evEditing = null, evWho = [me], evAllDay = false, evRemind = [60], evOcc = null, evDelArmed = false;
+  const EV_REMIND_TIMED = [{ m: 0, label: "Zum Beginn" }, { m: 15, label: "15 Min." }, { m: 60, label: "1 Std." }, { m: 1440, label: "1 Tag" }, { m: 10080, label: "1 Woche" }];
+  const EV_REMIND_ALLDAY = [{ m: 0, label: "Am Tag, 8 Uhr" }, { m: 1440, label: "1 Tag vorher" }, { m: 10080, label: "1 Woche vorher" }];
+  const calEvents = () => Object.values(items).filter((i) => i.kind === "event" && i.data && i.data.start);
+  const whoKey = (who) => !who || !who.length ? null : who.length > 1 ? TOGETHER : who[0];
+  const evColor = (ev) => { const k = whoKey(ev.data.who); return k ? walkerColor(k) : "var(--muted)"; };
+  const evInk = (ev) => { const k = whoKey(ev.data.who); return k ? walkerInk(k) : "#fff"; };
+  const isMobileApple = () => /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) && "ontouchend" in document;
+
+  function repeatStep(base, freq, n) {
+    if (freq === "d") return addDays(base, n);
+    if (freq === "w") return addDays(base, 7 * n);
+    if (freq === "2w") return addDays(base, 14 * n);
+    if (freq === "m") return addInterval(base, n, "m");
+    if (freq === "y") return addInterval(base, n, "y");
+    return base;
+  }
+  // Alle Vorkommen eines Termins, die den Zeitraum [from, to] berühren
+  function evOccurrences(ev, from, to) {
+    const d = ev.data, out = [];
+    const sDate = d.start.slice(0, 10), eDate = (d.end || d.start).slice(0, 10);
+    const span = Math.max(0, daysBetween(sDate, eDate));
+    const freq = d.repeat && d.repeat.freq && d.repeat.freq !== "0" ? d.repeat.freq : null;
+    const until = freq && d.repeat.until ? d.repeat.until : null;
+    const ex = new Set(d.exdates || []);
+    for (let n = 0; n < 4000; n++) {
+      const cur = freq ? repeatStep(sDate, freq, n) : sDate;
+      if (cur > to || (until && cur > until)) break;
+      const end = addDays(cur, span);
+      if (end >= from && !ex.has(cur)) out.push({ ev, date: cur, endDate: end });
+      if (!freq) break;
+    }
+    return out;
+  }
+  // Tag -> Liste der Einträge (Termine und Rüdigers Behandlungen)
+  function calMap(from, to) {
+    const map = {};
+    const put = (day, entry) => { (map[day] = map[day] || []).push(entry); };
+    for (const ev of calEvents()) {
+      for (const o of evOccurrences(ev, from, to)) {
+        for (let d = o.date < from ? from : o.date; d <= o.endDate && d <= to; d = addDays(d, 1)) put(d, { type: "ev", ev, occ: o, day: d });
+      }
+    }
+    for (const ap of appointments()) if (ap.data.due >= from && ap.data.due <= to) put(ap.data.due, { type: "care", ap, day: ap.data.due });
+    for (const k of Object.keys(map)) map[k].sort(entrySort);
+    return map;
+  }
+  function entryTime(e) {
+    if (e.type === "care") return e.ap.data.time || "";
+    const d = e.ev.data;
+    if (d.allDay) return "";
+    if (e.day === e.occ.date) return d.start.slice(11, 16);
+    return "";
+  }
+  function entrySort(a, b) {
+    const ta = entryTime(a), tb = entryTime(b);
+    if (!ta && tb) return -1;
+    if (ta && !tb) return 1;
+    return ta.localeCompare(tb);
+  }
+  function entryWhen(e) {
+    if (e.type === "care") return e.ap.data.time ? e.ap.data.time + " Uhr" : "Rüdiger";
+    const d = e.ev.data;
+    if (d.allDay) return e.occ.date === e.occ.endDate ? "Ganztägig" : "bis " + fmtDM(e.occ.endDate);
+    const st = d.start.slice(11, 16), en = (d.end || d.start).slice(11, 16);
+    if (e.occ.date === e.occ.endDate) return st + (en && en !== st ? " – " + en : "") + " Uhr";
+    if (e.day === e.occ.date) return "ab " + st + " Uhr";
+    if (e.day === e.occ.endDate) return "bis " + en + " Uhr";
+    return "ganztägig";
+  }
+  function entryNode(e, showDate) {
+    if (e.type === "care") {
+      const li = h("li", { class: "ev care" }, h("span", { class: "evbar" }),
+        h("button", { class: "evbody", type: "button" },
+          h("span", { class: "evtitle" }, careType(e.ap.data.type).icon + " " + apTitle(e.ap)),
+          h("span", { class: "evmeta" }, (showDate ? fmtDM(e.day) + " · " : "") + entryWhen(e))));
+      li.querySelector(".evbody").onclick = () => openApSheet(e.ap);
+      return li;
+    }
+    const d = e.ev.data;
+    const meta = [(showDate ? fmtDM(e.day) + " · " : "") + entryWhen(e)];
+    if (d.who && d.who.length) meta.push(d.who.length > 1 ? "Beide" : d.who[0]);
+    const body = h("button", { class: "evbody", type: "button" },
+      h("span", { class: "evtitle" }, d.title || "Termin"),
+      h("span", { class: "evmeta" }, meta.join(" · ")));
+    if (d.location) body.append(h("span", { class: "evloc" }, "📍 " + d.location));
+    if (d.repeat && d.repeat.freq && d.repeat.freq !== "0") body.querySelector(".evtitle").append(h("span", { class: "evrep", "aria-label": "wiederholt sich" }, " ↻"));
+    body.onclick = () => openEvSheet(e.ev, e.occ);
+    const li = h("li", { class: "ev" }, h("span", { class: "evbar" }), body);
+    li.style.setProperty("--evc", evColor(e.ev));
+    return li;
+  }
+
+  function renderCal() {
+    const first = parseYmd(calMonth);
+    const lead = (first.getDay() + 6) % 7;
+    const gridStart = addDays(calMonth, -lead);
+    const monthEnd = addDays(addInterval(calMonth, 1, "m"), -1);
+    const weeks = Math.ceil((lead + daysBetween(calMonth, monthEnd) + 1) / 7);
+    const gridEnd = addDays(gridStart, weeks * 7 - 1);
+    const map = calMap(gridStart, gridEnd);
+    const t = calToday();
+    const grid = $("calGrid");
+    grid.textContent = "";
+    for (let i = 0; i < weeks * 7; i++) {
+      const d = addDays(gridStart, i);
+      const list = map[d] || [];
+      const cell = h("button", { class: "calcell" + (d.slice(0, 7) !== calMonth.slice(0, 7) ? " other" : "") + (d === t ? " today" : "") + (d === calSel ? " sel" : ""),
+        type: "button", "aria-label": fmtDate(d) + (list.length ? ", " + list.length + " Einträge" : "") });
+      cell.append(h("span", { class: "calnum" }, String(parseYmd(d).getDate())));
+      list.slice(0, 3).forEach((e) => {
+        const chip = h("span", { class: "calchip" + (e.type === "care" ? " care" : "") }, e.type === "care" ? "🐶 " + apTitle(e.ap) : (e.ev.data.title || "Termin"));
+        if (e.type === "ev") { chip.style.background = evColor(e.ev); chip.style.color = evInk(e.ev); }
+        cell.append(chip);
+      });
+      if (list.length > 3) cell.append(h("span", { class: "calmore" }, "+" + (list.length - 3)));
+      cell.onclick = () => { calSel = d; renderCal(); };
+      grid.append(cell);
+    }
+    // gewählter Tag
+    $("calDayTitle").textContent = (calSel === t ? "Heute · " : "") + fmtDateShort(calSel);
+    const dayList = $("calDayList");
+    dayList.textContent = "";
+    const sel = calMap(calSel, calSel)[calSel] || [];
+    if (!sel.length) dayList.append(h("li", { class: "evempty" }, "Keine Termine"));
+    for (const e of sel) dayList.append(entryNode(e, false));
+    // demnächst: die nächsten Termine ab morgen (bzw. nach dem gewählten Tag)
+    const upFrom = addDays(calSel > t ? calSel : t, 1);
+    const upMap = calMap(upFrom, addDays(upFrom, 60));
+    const up = [];
+    const seen = new Set();
+    for (const day of Object.keys(upMap).sort()) {
+      for (const e of upMap[day]) {
+        const id = e.type === "care" ? "c" + e.ap.id : e.ev.id + e.occ.date;
+        if (seen.has(id)) continue;
+        seen.add(id); up.push(e);
+      }
+      if (up.length >= 6) break;
+    }
+    $("calUpBlock").hidden = !up.length;
+    const ul = $("calUpcoming");
+    ul.textContent = "";
+    for (const e of up.slice(0, 6)) ul.append(entryNode(e, true));
+  }
+
+  function renderTodayEvents(isToday) {
+    const box = $("todayEvents");
+    box.textContent = "";
+    if (!isToday) return;
+    const list = (calMap(calToday(), calToday())[calToday()] || []).filter((e) => e.type === "ev");
+    if (!list.length) return;
+    const ol = h("ol", { class: "evlist compact" });
+    for (const e of list) ol.append(entryNode(e, false));
+    box.append(h("div", { class: "todayhead" }, h("span", {}, "Heute im Kalender"),
+      button("Kalender", "linkbtn", () => { calSel = calToday(); calMonth = calSel.slice(0, 8) + "01"; setView("cal"); })), ol);
+  }
+
+  // Termin-Formular
+  function renderEvChips() {
+    const wc = $("evWho");
+    wc.textContent = "";
+    for (const w of CFG.WALKERS) {
+      const b = button(w, "chip", () => {
+        if (evWho.includes(w)) { if (evWho.length > 1) evWho = evWho.filter((x) => x !== w); }
+        else evWho = CFG.WALKERS.filter((x) => x === w || evWho.includes(x));
+        renderEvChips();
+      });
+      b.setAttribute("aria-pressed", String(evWho.includes(w)));
+      b.style.setProperty("--chip-on", walkerColor(w));
+      b.style.setProperty("--chip-on-ink", walkerInk(w));
+      wc.append(b);
+    }
+    const both = button("Beide", "chip", () => { evWho = CFG.WALKERS.slice(); renderEvChips(); });
+    both.setAttribute("aria-pressed", String(evWho.length === CFG.WALKERS.length));
+    both.style.setProperty("--chip-on", walkerColor(TOGETHER));
+    both.style.setProperty("--chip-on-ink", walkerInk(TOGETHER));
+    wc.append(both);
+    $("evAllDay").setAttribute("aria-pressed", String(evAllDay));
+    document.querySelectorAll(".evtime").forEach((el) => { el.hidden = evAllDay; });
+    const rc = $("evRemind");
+    rc.textContent = "";
+    for (const o of evAllDay ? EV_REMIND_ALLDAY : EV_REMIND_TIMED) {
+      const b = button(o.label, "chip", () => {
+        evRemind = evRemind.includes(o.m) ? evRemind.filter((x) => x !== o.m) : [...evRemind, o.m];
+        renderEvChips();
+      });
+      b.setAttribute("aria-pressed", String(evRemind.includes(o.m)));
+      rc.append(b);
+    }
+    $("evUntilWrap").hidden = $("evRepeat").value === "0";
+    const loc = $("evLocation").value.trim();
+    const map = $("evMap");
+    map.hidden = !loc;
+    if (loc) map.href = (isMobileApple() ? "https://maps.apple.com/?q=" : "https://www.google.com/maps/search/?api=1&query=") + encodeURIComponent(loc);
+  }
+  function openEvSheet(ev, occ) {
+    evEditing = ev ? ev.id : "new";
+    evOcc = occ || null;
+    evDelArmed = false;
+    const d = ev ? ev.data : null;
+    $("evTitleHead").textContent = ev ? "Termin bearbeiten" : "Neuer Termin";
+    $("evError").textContent = "";
+    $("evTitle").value = d ? d.title || "" : "";
+    evWho = d && d.who && d.who.length ? d.who.slice() : [me];
+    evAllDay = d ? !!d.allDay : false;
+    evRemind = d ? (d.remind || []).slice() : [60];
+    let sDate, sTime, eDate, eTime;
+    if (d) {
+      sDate = d.start.slice(0, 10); sTime = d.allDay ? "" : d.start.slice(11, 16);
+      eDate = (d.end || d.start).slice(0, 10); eTime = d.allDay ? "" : (d.end || d.start).slice(11, 16);
+    } else {
+      const now = new Date();
+      const hh = Math.min(22, now.getHours() + 1);
+      sDate = calSel; eDate = calSel;
+      sTime = pad(hh) + ":00"; eTime = pad(hh + 1) + ":00";
+    }
+    $("evStartDate").value = sDate; $("evStartTime").value = sTime || "18:00";
+    $("evEndDate").value = eDate; $("evEndTime").value = eTime || "19:00";
+    $("evLocation").value = d ? d.location || "" : "";
+    $("evRepeat").value = d && d.repeat ? d.repeat.freq || "0" : "0";
+    $("evUntil").value = d && d.repeat ? d.repeat.until || "" : "";
+    $("evNote").value = d ? d.note || "" : "";
+    $("evDelete").hidden = !ev;
+    $("evDelete").textContent = "Löschen";
+    $("evActions").hidden = false;
+    $("evDelChoice").hidden = true;
+    renderEvChips();
+    $("evSheet").hidden = false;
+    $("sheetBg").hidden = false;
+    if (!ev) setTimeout(() => $("evTitle").focus(), 60);
+  }
+  function submitEv() {
+    const title = $("evTitle").value.trim();
+    if (!title) { $("evError").textContent = "Bitte einen Titel eingeben."; return; }
+    const sDate = $("evStartDate").value, eDateRaw = $("evEndDate").value || sDate;
+    const sTime = $("evStartTime").value || "00:00", eTime = $("evEndTime").value || sTime;
+    let start = evAllDay ? sDate + "T00:00" : sDate + "T" + sTime;
+    let end = evAllDay ? eDateRaw + "T23:59" : eDateRaw + "T" + eTime;
+    if (end < start) end = evAllDay ? sDate + "T23:59" : sDate + "T" + (eTime > sTime ? eTime : sTime);
+    const freq = $("evRepeat").value;
+    const old = evEditing !== "new" ? items[evEditing] : null;
+    const data = {
+      ...(old ? old.data : {}),
+      title, who: evWho.slice(), allDay: evAllDay, start, end,
+      location: $("evLocation").value.trim(), note: $("evNote").value.trim(),
+      repeat: { freq, until: freq !== "0" ? ($("evUntil").value || "") : "" },
+      remind: evRemind.slice(), exdates: old && old.data.exdates ? old.data.exdates : [],
+      createdBy: old && old.data.createdBy ? old.data.createdBy : me
+    };
+    const item = old ? { ...old, data } : { id: uid(), kind: "event", data };
+    saveItem(item);
+    closeSheet();
+    calSel = sDate; calMonth = sDate.slice(0, 8) + "01";
+    render();
+    toast(old ? "Termin gespeichert" : "Termin eingetragen");
+    // Die anderen informieren, sobald der Termin in der Datenbank ist
+    if (!old && !DEMO && session) setTimeout(async () => {
+      await flush();
+      if (!pending.some((p) => opKey(p) === "item|" + item.id)) pushCall({ action: "notify", id: item.id, by: me }).catch(() => {});
+    }, 500);
+  }
+  function evDelete(all) {
+    const ev = items[evEditing];
+    if (!ev) return;
+    const recurring = ev.data.repeat && ev.data.repeat.freq && ev.data.repeat.freq !== "0";
+    if (!all && recurring && evOcc) {
+      saveItem({ ...ev, data: { ...ev.data, exdates: [...(ev.data.exdates || []), evOcc.date] } });
+    } else deleteItem(ev.id);
+    closeSheet();
+    toast("Termin gelöscht");
+  }
+  async function updatePushWalker() {
+    if (DEMO || !session || !pushSupported()) return;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) await sb.from("push_subs").update({ walker: me }).eq("endpoint", sub.endpoint);
+    } catch { /* egal */ }
+  }
+
   // ---------- Darstellung ----------
   function render() {
     renderHeader();
     renderBadge();
     if (view === "today") renderToday();
-    if (view === "history") renderHistory();
-    if (view === "stats") renderStats();
+    if (view === "cal") renderCal();
+    if (view === "stats") { renderStats(); renderHistory(); }
     if (view === "care") renderCare();
     if (view === "settings") renderSettings();
   }
 
-  const VIEW_TITLES = { history: "Verlauf", stats: "Statistik", care: "Rüdigers Termine", settings: "Optionen" };
+  const VIEW_TITLES = { stats: "Statistik", care: "Rüdigers Termine", settings: "Optionen" };
   function renderHeader() {
     const t = todayStr();
     const compact = view !== "today";
     document.querySelector(".panel").classList.toggle("compact", compact);
-    $("viewTitle").hidden = !compact;
+    $("viewTitle").hidden = !compact || view === "cal";
     $("viewTitle").textContent = VIEW_TITLES[view] || "";
+    $("calNav").hidden = view !== "cal";
+    $("calMonthBtn").textContent = parseYmd(calMonth).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
     document.querySelector(".daynav").hidden = compact;
     document.querySelector(".scorewrap").hidden = compact;
     $("roundsOf").hidden = compact;
@@ -740,6 +1033,7 @@
         rem.append(row);
       }
     }
+    renderTodayEvents(isToday);
     renderRoundList($("rounds"), viewDay, isToday);
   }
 
@@ -985,7 +1279,7 @@
     const chips = $("meChips");
     chips.textContent = "";
     for (const w of CFG.WALKERS) {
-      const b = button(w, "chip", () => { me = w; ls.set("rr.me", w); saveWalkerToAccount(w); renderSettings(); });
+      const b = button(w, "chip", () => { me = w; ls.set("rr.me", w); saveWalkerToAccount(w); updatePushWalker(); renderSettings(); });
       b.setAttribute("aria-pressed", String(w === me));
       b.style.setProperty("--chip-on", walkerColor(w));
       b.style.setProperty("--chip-on-ink", walkerInk(w));
@@ -1022,10 +1316,18 @@
       "💩 zählt bei jedem Antippen ein Häufchen dazu, auch während der Runde. Korrigieren über die Runde.",
       "Frühere Tage: Pfeile oben oder auf das Datum tippen. Jede Runde lässt sich antippen und korrigieren oder löschen."
     ]);
+    sec("Kalender", [
+      "Termine können für eine Person oder für beide eingetragen werden. Die Farbe zeigt, für wen: " + CFG.WALKERS.join(" und ") + " jeweils eigene Farbe, beide blau.",
+      "Tippen auf einen Tag zeigt seine Termine, + Termin legt einen neuen Termin für diesen Tag an. Tippen auf den Monat springt zu heute.",
+      "Erinnerungen kommen nur an die Personen, für die der Termin eingetragen ist. Bei ganztägigen Terminen um 8 Uhr.",
+      "Trägt jemand einen neuen Termin für beide ein, bekommt die andere Person eine Benachrichtigung.",
+      "Bei wiederkehrenden Terminen lässt sich beim Löschen wählen: nur dieser Tag oder die ganze Serie.",
+      "Rüdigers Behandlungen erscheinen ebenfalls im Kalender."
+    ]);
     sec("Statistik", [
       "Farben: " + CFG.WALKERS.join(" und ") + " jeweils eigene Farbe, zusammen blau.",
       "Gemeinsame Runden zählen bei beiden Personen, in der Gesamtsumme nur einmal.",
-      "Im Kalender unter Verlauf gilt: je kräftiger die Farbe, desto mehr Runden."
+      "Bei \"Runden pro Tag\" gilt: je kräftiger die Farbe, desto mehr Runden."
     ]);
     sec("Termine", [
       "Unter Heute erscheinen Termine, die in weniger als einer Woche fällig oder überfällig sind.",
@@ -1086,7 +1388,7 @@
     $("sheet").hidden = false;
     $("sheetBg").hidden = false;
   }
-  function closeSheet() { $("sheet").hidden = true; $("apSheet").hidden = true; $("sheetBg").hidden = true; editing = null; apEditing = null; }
+  function closeSheet() { $("sheet").hidden = true; $("apSheet").hidden = true; $("evSheet").hidden = true; $("sheetBg").hidden = true; editing = null; apEditing = null; evEditing = null; }
 
   function submitSheet(stopNow) {
     if (!editing) return;
@@ -1197,7 +1499,7 @@
   // ---------- Ereignisse ----------
   function setView(v, keepDay) {
     view = v;
-    for (const name of ["today", "history", "stats", "care", "settings"]) $("view-" + name).hidden = name !== v;
+    for (const name of ["today", "cal", "stats", "care", "settings"]) $("view-" + name).hidden = name !== v;
     document.querySelectorAll(".tab").forEach((t) => {
       if (t.dataset.view === v) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
     });
@@ -1229,6 +1531,34 @@
       toast("Runde gelöscht");
     };
     $("addCare").onclick = () => openApSheet(null);
+    $("calPrev").onclick = () => { calMonth = addInterval(calMonth, -1, "m"); render(); };
+    $("calNextBtn").onclick = () => { calMonth = addInterval(calMonth, 1, "m"); render(); };
+    $("calMonthBtn").onclick = () => { calSel = calToday(); calMonth = calSel.slice(0, 8) + "01"; render(); };
+    $("calAdd").onclick = () => openEvSheet(null);
+    $("evClose").onclick = closeSheet;
+    $("evSheet").addEventListener("submit", (e) => { e.preventDefault(); submitEv(); });
+    $("evAllDay").onclick = () => {
+      evAllDay = !evAllDay;
+      evRemind = evAllDay ? [1440] : [60];
+      renderEvChips();
+    };
+    $("evRepeat").addEventListener("change", renderEvChips);
+    $("evLocation").addEventListener("input", renderEvChips);
+    $("evStartDate").addEventListener("change", () => { if ($("evEndDate").value < $("evStartDate").value) $("evEndDate").value = $("evStartDate").value; });
+    $("evStartTime").addEventListener("change", () => {
+      const [hh, mm] = $("evStartTime").value.split(":").map(Number);
+      if (!isNaN(hh) && $("evEndDate").value === $("evStartDate").value) $("evEndTime").value = pad(Math.min(23, hh + 1)) + ":" + pad(mm);
+    });
+    $("evDelete").onclick = () => {
+      const ev = items[evEditing];
+      const recurring = ev && ev.data.repeat && ev.data.repeat.freq && ev.data.repeat.freq !== "0";
+      if (recurring) { $("evActions").hidden = true; $("evDelChoice").hidden = false; return; }
+      if (!evDelArmed) { evDelArmed = true; $("evDelete").textContent = "Wirklich löschen?"; return; }
+      evDelete(true);
+    };
+    $("evDelOne").onclick = () => evDelete(false);
+    $("evDelAll").onclick = () => evDelete(true);
+    $("evDelCancel").onclick = () => { $("evActions").hidden = false; $("evDelChoice").hidden = true; };
     $("apType").addEventListener("change", (e) => applyTypeDefaults(e.target.value));
     $("apUnit").addEventListener("change", (e) => { $("apEvery").disabled = e.target.value === "0"; });
     $("apSheet").addEventListener("submit", (e) => { e.preventDefault(); submitApSheet(); });
@@ -1274,7 +1604,9 @@
   // ---------- Start ----------
   if (DEMO) seedDemo();
   bind();
-  if (location.hash === "#care") setView("care"); else render();
+  if (location.hash === "#care") setView("care");
+  else if (location.hash === "#cal") setView("cal");
+  else render();
   refreshPush().then(() => { if (view === "settings") renderSettings(); });
   if (HAS_DB) initDb();
 })();

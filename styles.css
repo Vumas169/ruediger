@@ -409,3 +409,40 @@ label.daylabel { display: grid; margin: 0; font-size: inherit; font-weight: 400;
 .points { font-size: 38px; }
 .pointsof { font-size: 12px; }
 .roundsof { margin: -2px 0 0; text-align: center; font-size: 14px; color: var(--panel-muted); }
+
+/* Kalender */
+.calnav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.calmonth { flex: 1; background: none; border: 0; color: var(--panel-ink); font-family: var(--font-display); font-weight: 800; font-size: 22px; padding: 6px 0; }
+.calweek { display: grid; grid-template-columns: repeat(7, 1fr); margin: 0 0 4px; }
+.calweek span { text-align: center; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.calgrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.calcell { min-height: 70px; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 3px 2px 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); text-align: left; overflow: hidden; }
+.calcell.other { background: transparent; opacity: .55; }
+.calcell.sel { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.calnum { font-size: 12px; font-weight: 700; padding-left: 2px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.calcell.today .calnum { color: var(--ball-ink); background: var(--ball); border-radius: 99px; align-self: flex-start; padding: 0 6px; }
+.calchip { display: block; font-size: 10px; line-height: 14px; font-weight: 700; padding: 0 3px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calchip.care { background: var(--track); color: var(--ink); font-weight: 400; }
+.calmore { font-size: 10px; color: var(--muted); padding-left: 3px; }
+.dayhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.dayhead h2 { margin: 0; font-size: 17px; }
+.evlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ev { display: grid; grid-template-columns: 5px 1fr; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.evbar { background: var(--evc, var(--muted)); }
+.ev.care .evbar { background: var(--track); }
+.evbody { display: grid; gap: 1px; text-align: left; background: none; border: 0; padding: 10px 12px; min-width: 0; }
+.evtitle { font-weight: 700; font-size: 15px; overflow-wrap: anywhere; }
+.evrep { color: var(--muted); font-weight: 400; }
+.evmeta, .evloc { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.evempty { color: var(--muted); font-size: 14px; padding: 6px 2px; }
+.evlist.compact .evbody { padding: 8px 12px; }
+.todayev { margin-bottom: 12px; }
+.todayev:empty { display: none; }
+.todayhead { display: flex; justify-content: space-between; align-items: baseline; margin: 0 2px 6px; font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.linkbtn { background: none; border: 0; color: var(--mark); font-weight: 700; font-size: 13px; text-transform: none; letter-spacing: 0; padding: 0; }
+.locrow { display: flex; gap: 8px; align-items: center; }
+.locrow input { flex: 1; }
+.locrow .btn { text-decoration: none; display: inline-flex; align-items: center; color: var(--ink); }
+textarea { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); font: inherit; font-size: 16px; color: var(--ink); resize: vertical; }
+.evallday { margin-top: 12px; }
+.dayhead .btn { white-space: nowrap; }

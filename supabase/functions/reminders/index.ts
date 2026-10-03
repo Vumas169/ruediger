@@ -27,7 +27,7 @@ const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
 type Keys = { public_key: string; private_key: string };
-type Sub = { endpoint: string; sub: webpush.PushSubscription };
+type Sub = { endpoint: string; sub: webpush.PushSubscription; walker?: string | null };
 
 // Schlüsselpaar einmalig selbst erzeugen und in einer geschützten Tabelle ablegen
 async function getKeys(): Promise<Keys> {
@@ -71,6 +71,46 @@ async function send(sub: Sub, payload: Record<string, unknown>, keys: Keys): Pro
   return res.status;
 }
 
+// Ortszeit-Text um Minuten verschieben (rechnet die Ortszeit wie UTC, das ist für Differenzen exakt)
+function shiftLocal(l: string, minutes: number): string {
+  return new Date(new Date(l + ":00Z").getTime() + minutes * 60000).toISOString().slice(0, 16);
+}
+function stepRepeat(base: string, freq: string, n: number): string {
+  const [y, m, d] = base.split("-").map(Number);
+  if (freq === "d") return addDays(base, n);
+  if (freq === "w") return addDays(base, 7 * n);
+  if (freq === "2w") return addDays(base, 14 * n);
+  if (freq === "m" || freq === "y") {
+    const months = freq === "m" ? n : 12 * n;
+    const target = new Date(Date.UTC(y, m - 1 + months, 1));
+    const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+    target.setUTCDate(Math.min(d, last));
+    return target.toISOString().slice(0, 10);
+  }
+  return base;
+}
+// Startdaten der Vorkommen eines Kalendertermins zwischen from und to
+function occurrences(ev: Record<string, any>, from: string, to: string): string[] {
+  const out: string[] = [];
+  const base = String(ev.start).slice(0, 10);
+  const freq = ev.repeat && ev.repeat.freq && ev.repeat.freq !== "0" ? ev.repeat.freq : null;
+  const until = freq && ev.repeat.until ? ev.repeat.until : null;
+  const ex = new Set(ev.exdates || []);
+  for (let n = 0; n < 4000; n++) {
+    const cur = freq ? stepRepeat(base, freq, n) : base;
+    if (cur > to || (until && cur > until)) break;
+    if (cur >= from && !ex.has(cur)) out.push(cur);
+    if (!freq) break;
+  }
+  return out;
+}
+const forWho = (subs: Sub[], who: string[] | undefined) =>
+  !who || !who.length ? subs : subs.filter((s) => !s.walker || who.includes(s.walker));
+function evWhen(ev: Record<string, any>, day: string): string {
+  if (ev.allDay) return fmtDM(day) + ", ganztägig";
+  return fmtDM(day) + ", " + String(ev.start).slice(11, 16) + " Uhr";
+}
+
 async function runReminders() {
   const keys = await getKeys();
   const now = new Date();
@@ -78,7 +118,7 @@ async function runReminders() {
   const lowL = local(new Date(now.getTime() - 36 * 3600 * 1000)); // ältere verpasste Erinnerungen nicht nachsenden
   const { data: aps, error } = await sb.from("app_data").select("id, data").eq("kind", "appointment");
   if (error) throw error;
-  const { data: subs } = await sb.from("push_subs").select("endpoint, sub");
+  const { data: subs } = await sb.from("push_subs").select("endpoint, sub, walker");
   if (!subs || !subs.length) return { sent: 0, subs: 0 };
 
   let sent = 0;
@@ -103,6 +143,29 @@ async function runReminders() {
       }
     }
   }
+  // Kalendertermine: Erinnerung X Minuten vor Beginn, ganztägige ab 8 Uhr am Tag
+  const { data: evs } = await sb.from("app_data").select("id, data").eq("kind", "event");
+  const today = nowL.slice(0, 10);
+  for (const row of evs || []) {
+    const ev = row.data || {};
+    if (!ev.start || !(ev.remind || []).length) continue;
+    for (const day of occurrences(ev, addDays(today, -2), addDays(today, 9))) {
+      const startL = ev.allDay ? `${day}T08:00` : `${day}T${String(ev.start).slice(11, 16)}`;
+      for (const off of ev.remind as number[]) {
+        const moment = shiftLocal(startL, -off);
+        if (moment > nowL || moment < lowL) continue;
+        const key = `ev|${row.id}|${day}|${off}`;
+        const ins = await sb.from("push_log").upsert({ key }, { onConflict: "key", ignoreDuplicates: true }).select();
+        if (ins.error || !ins.data || !ins.data.length) continue;
+        const rel = off === 0 ? (ev.allDay ? "Heute" : "Jetzt") : off < 60 ? `In ${off} Minuten` : off < 1440 ? `In ${off / 60} Stunde${off === 60 ? "" : "n"}`
+          : off === 1440 ? "Morgen" : off === 10080 ? "In einer Woche" : `In ${Math.round(off / 1440)} Tagen`;
+        const body = `${rel}: ${evWhen(ev, day)}` + (ev.location ? ` · ${ev.location}` : "");
+        for (const s of forWho(subs as Sub[], ev.who)) {
+          try { await send(s, { title: `📅 ${ev.title || "Termin"}`, body, tag: key, url: "./#cal" }, keys); sent++; } catch (_) { /* weiter */ }
+        }
+      }
+    }
+  }
   // Protokoll klein halten
   await sb.from("push_log").delete().lt("sent_at", new Date(now.getTime() - 120 * 86400 * 1000).toISOString());
   return { sent, subs: subs.length };
@@ -114,6 +177,22 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = body.action || "run";
     if (action === "key") return json({ publicKey: (await getKeys()).public_key });
+    if (action === "notify") {
+      // Neuer Termin: die anderen Beteiligten informieren
+      const { data: row } = await sb.from("app_data").select("data").eq("id", body.id).eq("kind", "event").maybeSingle();
+      if (!row) return json({ ok: false }, 404);
+      const ev = row.data || {};
+      const { data: subs } = await sb.from("push_subs").select("endpoint, sub, walker");
+      const targets = forWho((subs || []) as Sub[], ev.who).filter((s) => s.walker && s.walker !== body.by);
+      const keys = await getKeys();
+      const day = String(ev.start).slice(0, 10);
+      for (const s of targets) {
+        try {
+          await send(s, { title: `📅 Neuer Termin von ${body.by || "jemandem"}`, body: `${ev.title || "Termin"} · ${evWhen(ev, day)}` + (ev.location ? ` · ${ev.location}` : ""), tag: `new|${body.id}`, url: "./#cal" }, keys);
+        } catch (_) { /* weiter */ }
+      }
+      return json({ ok: true, sent: targets.length });
+    }
     if (action === "test") {
       const { data } = await sb.from("push_subs").select("endpoint, sub").eq("endpoint", body.endpoint).maybeSingle();
       if (!data) return json({ ok: false, error: "Dieses Handy ist nicht angemeldet." }, 404);

@@ -114,7 +114,7 @@ Hinweise:
 ## Reiter
 
 - Heute: die Runden des Tages und fällige Termine.
-- Verlauf: Minuten der letzten 7 Tage nach Person, Kalender der letzten 4 Wochen. Tippen öffnet den Tag.
-- Statistik: wer wie oft gegangen ist (3 Tage, 7 Tage, 30 Tage, gesamt), Ø Dauer je Runde.
-- Termine: Rüdigers Behandlungen und Termine.
+- Kalender: gemeinsamer Kalender mit Monatsansicht, Terminen für eine Person oder beide, Ort, Wiederholung und Erinnerungen.
+- Statistik: Zeit draußen, Runden, letzte 7 Tage, wer welche Runde geht, Rekorde, Runden pro Tag, Vergleich, Ø Dauer je Runde.
+- Rüdiger: Behandlungen wie Zeckenschutz, Wurmkur, Impfungen.
 - Optionen: wer auf diesem Handy unterwegs ist, Benachrichtigungen, "So funktioniert die App" mit allen Erklärungen, Konto und Version.

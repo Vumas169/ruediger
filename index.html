@@ -22,6 +22,11 @@
 <div id="app">
   <header class="panel">
     <h1 class="viewtitle" id="viewTitle" hidden></h1>
+    <div class="calnav" id="calNav" hidden>
+      <button class="iconbtn" id="calPrev" aria-label="Vorheriger Monat">‹</button>
+      <button class="calmonth" id="calMonthBtn" type="button" aria-label="Zum heutigen Tag"></button>
+      <button class="iconbtn" id="calNextBtn" aria-label="Nächster Monat">›</button>
+    </div>
     <div class="daynav">
       <button class="iconbtn" id="prevDay" aria-label="Vorheriger Tag">‹</button>
       <label class="daylabel" for="pickDay">
@@ -44,19 +49,24 @@
 
   <main>
     <section id="view-today" class="view">
+      <div id="todayEvents" class="todayev"></div>
       <div id="reminders" class="reminders"></div>
       <ol class="rounds" id="rounds"></ol>
     </section>
 
-    <section id="view-history" class="view" hidden>
+    <section id="view-cal" class="view" hidden>
+      <div class="calweek" aria-hidden="true"><span>Mo</span><span>Di</span><span>Mi</span><span>Do</span><span>Fr</span><span>Sa</span><span>So</span></div>
+      <div class="calgrid" id="calGrid"></div>
       <div class="block">
-        <h2>Minuten draußen <span class="sub">letzte 7 Tage</span></h2>
-        <div class="bars" id="bars"></div>
-        <div class="keys" id="barsKeys"></div>
+        <div class="dayhead">
+          <h2 id="calDayTitle"></h2>
+          <button type="button" class="btn small primary" id="calAdd">+ Termin</button>
+        </div>
+        <ol class="evlist" id="calDayList"></ol>
       </div>
-      <div class="block">
-        <h2>Runden pro Tag <span class="sub">letzte 4 Wochen</span></h2>
-        <div class="grid4" id="grid4"></div>
+      <div class="block" id="calUpBlock">
+        <h2>Demnächst</h2>
+        <ol class="evlist" id="calUpcoming"></ol>
       </div>
     </section>
 
@@ -64,8 +74,17 @@
       <div class="seg" id="periodSeg" role="tablist" aria-label="Zeitraum"></div>
       <div class="block" id="timeBlock"></div>
       <div class="block" id="roundsBlock"></div>
+      <div class="block">
+        <h2>Letzte 7 Tage</h2>
+        <div class="bars" id="bars"></div>
+        <div class="keys" id="barsKeys"></div>
+      </div>
       <div class="block" id="slotBlock"></div>
       <div class="block" id="factsBlock"></div>
+      <div class="block">
+        <h2>Runden pro Tag <span class="sub">letzte 4 Wochen</span></h2>
+        <div class="grid4" id="grid4"></div>
+      </div>
       <div class="block">
         <h2>Im Vergleich</h2>
         <div class="tablewrap"><table class="stattable" id="statTable"></table></div>
@@ -124,9 +143,9 @@
 
   <nav class="tabbar" aria-label="Bereiche">
     <button class="tab" data-view="today" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><span>Heute</span></button>
-    <button class="tab" data-view="history"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span>Verlauf</span></button>
+    <button class="tab" data-view="cal"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span>Kalender</span></button>
     <button class="tab" data-view="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V5M19 20v-6"/></svg><span>Statistik</span></button>
-    <button class="tab" data-view="care"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.6-7 10-7 10z"/></svg><span>Termine</span><b class="tabbadge" id="careBadge" hidden></b></button>
+    <button class="tab" data-view="care"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.6-7 10-7 10z"/></svg><span>Rüdiger</span><b class="tabbadge" id="careBadge" hidden></b></button>
     <button class="tab" data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span>Optionen</span></button>
   </nav>
 </div>
@@ -224,6 +243,60 @@
     <button type="button" class="btn ghost danger" id="apDelete">Löschen</button>
     <button type="button" class="btn ghost" id="apIcs">In Kalender</button>
     <button type="submit" class="btn primary">Speichern</button>
+  </div>
+</form>
+<form id="evSheet" class="sheet" hidden>
+  <div class="sheethead">
+    <h2 id="evTitleHead">Termin</h2>
+    <button type="button" class="iconbtn dark" id="evClose" aria-label="Schließen">×</button>
+  </div>
+  <label for="evTitle">Titel</label>
+  <input id="evTitle" type="text" maxlength="80" required placeholder="z. B. Abendessen bei Schmidti">
+  <label>Für wen?</label>
+  <div class="chips" id="evWho"></div>
+  <div class="chips evallday">
+    <button type="button" class="chip" id="evAllDay" aria-pressed="false">Ganztägig</button>
+  </div>
+  <div class="two">
+    <div><label for="evStartDate">Beginn</label><input id="evStartDate" type="date" required></div>
+    <div class="evtime"><label for="evStartTime">Uhrzeit</label><input id="evStartTime" type="time"></div>
+  </div>
+  <div class="two">
+    <div><label for="evEndDate">Ende</label><input id="evEndDate" type="date" required></div>
+    <div class="evtime"><label for="evEndTime">Uhrzeit</label><input id="evEndTime" type="time"></div>
+  </div>
+  <label for="evLocation">Ort</label>
+  <div class="locrow">
+    <input id="evLocation" type="text" maxlength="120" placeholder="Adresse oder Ort">
+    <a id="evMap" class="btn small ghost" target="_blank" rel="noopener" hidden>Karte</a>
+  </div>
+  <div class="two">
+    <div>
+      <label for="evRepeat">Wiederholen</label>
+      <select id="evRepeat">
+        <option value="0">Nie</option>
+        <option value="d">Täglich</option>
+        <option value="w">Wöchentlich</option>
+        <option value="2w">Alle 2 Wochen</option>
+        <option value="m">Monatlich</option>
+        <option value="y">Jährlich</option>
+      </select>
+    </div>
+    <div id="evUntilWrap"><label for="evUntil">bis <span class="labelnote">optional</span></label><input id="evUntil" type="date"></div>
+  </div>
+  <label>Erinnern</label>
+  <div class="chips" id="evRemind"></div>
+  <label for="evNote">Notiz</label>
+  <textarea id="evNote" rows="2" maxlength="500"></textarea>
+  <p class="error inline" id="evError" role="alert"></p>
+  <div class="sheetactions" id="evActions">
+    <button type="button" class="btn ghost danger" id="evDelete">Löschen</button>
+    <button type="submit" class="btn primary">Speichern</button>
+  </div>
+  <div class="sheetactions" id="evDelChoice" hidden>
+    <button type="button" class="btn ghost danger" id="evDelOne">Nur diesen Tag</button>
+    <button type="button" class="btn ghost danger" id="evDelAll">Ganze Serie</button>
+    <button type="button" class="btn ghost" id="evDelCancel">Abbrechen</button>
   </div>
 </form>
 <div id="updateBar" class="updatebar" hidden>
