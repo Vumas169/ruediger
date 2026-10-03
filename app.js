@@ -4,7 +4,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "0.7 vom 03.10.2026";
+  const APP_VERSION = "0.7.1 vom 03.10.2026";
 
   // ---------- Einstellungen ----------
   const CFG = Object.assign({
@@ -755,6 +755,9 @@
       add(addDays(nov22, -((parseYmd(nov22).getDay() - 3 + 7) % 7)), "Buß- und Bettag", ["SN"]);
       add(y + "-12-25", "1. Weihnachtstag");
       add(y + "-12-26", "2. Weihnachtstag");
+      // gesetzlich keine Feiertage, für uns aber schon
+      add(y + "-12-24", "Heiligabend");
+      add(y + "-12-31", "Silvester");
     }
     return (holidayCache[ck] = map);
   }
