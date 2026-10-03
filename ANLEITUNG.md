@@ -85,7 +85,7 @@ Heute
 - ▶ startet die Zeitmessung, ⏸ pausiert, ▶ geht weiter, Stopp beendet.
 - Erledigt trägt eine Runde mit einem Tipp ein (Dauer = Durchschnitt genau dieser Runde aus den letzten 30 Tagen, ohne Werte 30 Minuten).
 - 👥 auf einer laufenden oder erledigten Runde: zusammen gegangen.
-- 💩 auf einer erledigten Runde: jedes Antippen zählt ein Häufchen dazu. Korrigieren über die Runde.
+- 💩 während oder nach der Runde: jedes Antippen zählt ein Häufchen dazu. Korrigieren über die Runde.
 - Fällige Termine von Rüdiger stehen oben, ✓ hakt sie ab.
 
 Nachtragen und korrigieren
@@ -97,6 +97,19 @@ Termine
 - "+ Termin": Art wählen (Zeckenschutz, Wurmkur, Kotprobe, Allergietablette, Impfungen, Tierarzt-Check, Krallen, eigener Termin). Abstand und Erinnerungen sind vorbelegt und änderbar.
 - ✓ hakt einen Termin ab. Wiederkehrende Termine springen automatisch auf den nächsten Termin, gerechnet ab dem Tag des Abhakens.
 - Erinnerungen erscheinen in der App (oben unter Heute und als Zahl am Reiter Termine). "In Kalender" legt den Termin mit den gewählten Erinnerungen im Handy-Kalender an. Dort klingeln die Erinnerungen auch, wenn die App zu ist.
+
+## Benachrichtigungen
+
+Einrichtung (einmalig):
+1. update-3.sql im Supabase SQL Editor ausführen.
+2. Supabase > Edge Functions > "Deploy a new function" > "Via Editor". Name: reminders. Inhalt von supabase/functions/reminders/index.ts einfügen, "Deploy".
+3. In der Funktion unter "Details" bzw. "Settings" die Option "Enforce JWT verification" ausschalten und speichern.
+4. In der App unter Optionen > Benachrichtigungen "Auf diesem Handy einschalten" und "Test senden".
+
+Hinweise:
+- iPhone: nur in der App vom Home-Bildschirm, ab iOS 16.4.
+- Erinnerungen kommen zu den beim Termin eingestellten Zeitpunkten, bei Terminen ohne Uhrzeit um 9 Uhr.
+- Ausschalten pro Handy unter Optionen.
 
 ## Reiter
 

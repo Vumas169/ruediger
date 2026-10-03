@@ -4,7 +4,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "7 vom 02.10.2026";
+  const APP_VERSION = "8 vom 03.10.2026";
 
   // ---------- Einstellungen ----------
   const CFG = Object.assign({
@@ -16,7 +16,8 @@
       { name: "Letzte Runde", time: "22:30" }
     ],
     DEFAULT_MINUTES: 30,
-    DAY_START_HOUR: 4
+    DAY_START_HOUR: 4,
+    PUSH_FUNCTION: "reminders"
   }, window.GASSI_CONFIG || {});
   const ROUNDS = CFG.ROUNDS;
   const NR = ROUNDS.length;
@@ -546,7 +547,9 @@
           ? button("▶", "iconchip pause on", () => resumeWalk(rec))
           : button("⏸", "iconchip pause", () => pauseWalk(rec));
         pb.setAttribute("aria-label", isPaused(rec) ? "Weitergehen" : "Pause");
-        act.append(together, pb, button("Stopp", "btn small run", () => stopWalk(rec)));
+        const lp = toggleBtn("💩", "iconchip poo", rec.poo > 0, "Häufchen jetzt eintragen, bisher " + rec.poo, () => addPoo(rec));
+        if (rec.poo > 1) lp.append(h("span", { class: "count" }, String(rec.poo)));
+        act.append(together, pb, button("Stopp", "btn small run", () => stopWalk(rec)), lp);
       } else if (isDone(rec)) {
         const p = toggleBtn("💩", "iconchip poo", rec.poo > 0, "Häufchen dazuzählen, bisher " + rec.poo, () => addPoo(rec));
         if (rec.poo > 1) p.append(h("span", { class: "count" }, String(rec.poo)));
@@ -562,6 +565,101 @@
       li.append(act);
       ol.append(li);
     });
+  }
+
+  // ---------- Push-Benachrichtigungen ----------
+  let pushState = { supported: false, on: false, busy: false, msg: "" };
+  const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const isIos = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  function b64ToBytes(s) {
+    const p = "=".repeat((4 - s.length % 4) % 4);
+    const raw = atob((s + p).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  }
+  async function pushCall(body) {
+    const { data, error } = await sb.functions.invoke(CFG.PUSH_FUNCTION, { body });
+    if (error) throw new Error("Server-Funktion nicht erreichbar. Ist sie bei Supabase eingerichtet?");
+    return data;
+  }
+  async function refreshPush() {
+    pushState.supported = pushSupported();
+    if (!pushState.supported) { pushState.on = false; return; }
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      pushState.on = !!sub && Notification.permission === "granted";
+    } catch { pushState.on = false; }
+  }
+  async function enablePush() {
+    pushState.busy = true; pushState.msg = ""; renderSettings();
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") throw new Error("Benachrichtigungen wurden nicht erlaubt. Das lässt sich in den Handy-Einstellungen für diese App ändern.");
+      const { publicKey } = await pushCall({ action: "key" });
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
+      const { error } = await sb.from("push_subs").upsert({ endpoint: sub.endpoint, sub: sub.toJSON(), walker: me });
+      if (error) throw new Error("Anmeldung des Handys hat nicht geklappt: " + error.message);
+      pushState.msg = "Eingeschaltet. Erinnerungen kommen jetzt als Benachrichtigung.";
+    } catch (e) {
+      pushState.msg = (e && e.message) || String(e);
+    }
+    pushState.busy = false;
+    await refreshPush();
+    renderSettings();
+  }
+  async function disablePush() {
+    pushState.busy = true; pushState.msg = ""; renderSettings();
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await sb.from("push_subs").delete().eq("endpoint", sub.endpoint);
+        await sub.unsubscribe();
+      }
+      pushState.msg = "Ausgeschaltet. Dieses Handy bekommt keine Benachrichtigungen mehr.";
+    } catch (e) { pushState.msg = (e && e.message) || String(e); }
+    pushState.busy = false;
+    await refreshPush();
+    renderSettings();
+  }
+  async function testPush() {
+    pushState.busy = true; pushState.msg = ""; renderSettings();
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (!sub) throw new Error("Dieses Handy ist nicht angemeldet.");
+      const r = await pushCall({ action: "test", endpoint: sub.endpoint });
+      pushState.msg = r && r.ok ? "Test verschickt. Die Benachrichtigung sollte gleich erscheinen." : "Test hat nicht geklappt" + (r && r.error ? ": " + r.error : ".");
+    } catch (e) { pushState.msg = (e && e.message) || String(e); }
+    pushState.busy = false;
+    renderSettings();
+  }
+  function renderPush() {
+    const info = $("pushInfo"), tog = $("pushToggle"), test = $("pushTest");
+    tog.hidden = true; test.hidden = true;
+    if (DEMO) { info.textContent = "Im Testmodus nicht verfügbar."; return; }
+    if (!session) { info.textContent = "Erst anmelden."; return; }
+    if (!pushState.supported) {
+      info.textContent = isIos() && !isStandalone()
+        ? "Auf dem iPhone gehen Benachrichtigungen nur in der App vom Home-Bildschirm (ab iOS 16.4). Bitte die App über das Pfoten-Symbol öffnen."
+        : "Dieser Browser unterstützt keine Benachrichtigungen.";
+      return;
+    }
+    let t = pushState.on
+      ? "An. Dieses Handy bekommt die Termin-Erinnerungen als Benachrichtigung, zu den Zeitpunkten, die beim jeweiligen Termin eingestellt sind."
+      : "Aus. Einschalten, damit Termin-Erinnerungen als Benachrichtigung kommen, auch wenn die App geschlossen ist.";
+    if (Notification.permission === "denied") t = "Benachrichtigungen sind für diese App in den Handy-Einstellungen gesperrt. Dort erlauben, dann hier einschalten.";
+    if (pushState.msg) t += " " + pushState.msg;
+    info.textContent = t;
+    tog.hidden = false;
+    tog.disabled = pushState.busy;
+    tog.textContent = pushState.on ? "Auf diesem Handy ausschalten" : "Auf diesem Handy einschalten";
+    tog.className = "btn " + (pushState.on ? "ghost" : "primary");
+    test.hidden = !pushState.on;
+    test.disabled = pushState.busy;
   }
 
   // ---------- Darstellung ----------
@@ -815,6 +913,7 @@
     $("syncNow").hidden = DEMO;
     $("logout").hidden = DEMO || !session;
     $("demoBlock").hidden = !DEMO;
+    renderPush();
     $("versionInfo").textContent = "Version " + APP_VERSION + ". Neue Versionen werden beim Öffnen automatisch geladen.";
     $("rulesInfo").textContent =
       "Der Gassi-Tag läuft von " + CFG.DAY_START_HOUR + ":00 bis " + CFG.DAY_START_HOUR + ":00 Uhr, eine Runde um 0:30 Uhr zählt also zum Vortag. " +
@@ -1034,6 +1133,8 @@
     $("logout").onclick = async () => { if (sb) await sb.auth.signOut(); };
     $("clearDemo").onclick = () => { walks = {}; items = {}; persist(); render(); };
     $("reloadApp").onclick = () => location.reload();
+    $("pushToggle").onclick = () => { if (pushState.busy) return; if (pushState.on) disablePush(); else enablePush(); };
+    $("pushTest").onclick = () => { if (!pushState.busy) testPush(); };
     $("loginForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       $("loginError").textContent = "";
@@ -1062,6 +1163,7 @@
   // ---------- Start ----------
   if (DEMO) seedDemo();
   bind();
-  render();
+  if (location.hash === "#care") setView("care"); else render();
+  refreshPush().then(() => { if (view === "settings") renderSettings(); });
   if (HAS_DB) initDb();
 })();
