@@ -4,7 +4,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "0.9 vom 04.10.2026";
+  const APP_VERSION = "0.9.1 vom 04.10.2026";
 
   // ---------- Einstellungen ----------
   const CFG = Object.assign({
@@ -701,7 +701,7 @@
   let holidayState = ls.get("rr.holidays", "BE");
   let calMonth = calToday().slice(0, 8) + "01";
   let calSel = calToday();
-  let calMode = ls.get("rr.calMode", "month"); // "month" oder "week" (7 Tage ab calWeekStart)
+  let calMode = ls.get("rr.calMode", "week"); // "month" oder "week" (7 Tage ab calWeekStart)
   let calWeekStart = calToday();
   let evEditing = null, evWho = [me], evAllDay = false, evRemind = [60], evColorSel = "", evOcc = null, evDelArmed = false;
 
@@ -1598,7 +1598,7 @@
       "Termine gelten für eine Person oder für beide. Standardfarbe nach Person: " + CFG.WALKERS.join(" und ") + " jeweils eigene Farbe, beide blau. Im Termin lässt sich auch eine andere Farbe wählen.",
       "Rüdigers Behandlungen sind türkis, Feiertage rot hinterlegt. Das Bundesland für die Feiertage steht unter Optionen.",
       "Mehrtägige Termine erscheinen als durchgehender Balken.",
-      "Oben zwischen Monat und Woche umschalten. Die Woche zeigt 7 Tage ab dem gewählten Tag mit vollständigen Terminen. Blättern: Pfeile oben oder seitlich wischen. Tippen auf den Monat springt zu heute. Beim Öffnen des Kalenders ist immer heute gewählt.",
+      "Oben zwischen Woche und Monat umschalten. Die Woche zeigt 7 Tage ab dem gewählten Tag mit vollständigen Terminen. Blättern: Pfeile oben oder seitlich wischen. Tippen auf den Monat springt zu heute. Beim Öffnen des Kalenders ist immer heute gewählt.",
       "Tippen auf einen Tag zeigt seine Termine, + Termin legt einen neuen Termin für diesen Tag an.",
       "Erinnerungen: Zeitpunkte antippen oder unter \"Eigene\" einen eigenen Wert hinzufügen. Sie kommen nur an die Personen, für die der Termin gilt, bei ganztägigen Terminen um 8 Uhr.",
       "Trägt jemand einen neuen Termin ein, bekommt die andere Person eine Benachrichtigung.",

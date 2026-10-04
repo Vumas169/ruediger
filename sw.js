@@ -1,6 +1,6 @@
 // Service Worker: hält die App offline verfügbar und lädt Updates automatisch.
 // Eigene Dateien kommen immer frisch aus dem Netz (bei Funkloch aus dem Speicher).
-const CACHE = "ruediger-v17";
+const CACHE = "ruediger-v18";
 const SHELL = [
   "./",
   "./index.html",
