@@ -1,4 +1,6 @@
-# Rüdigers Runden: Einrichtung
+# Piepmanns: Einrichtung
+
+Die App hieß früher "Rüdigers Runden". Die Adresse bleibt https://vumas169.github.io/ruediger/.
 
 Aufwand: einmalig ca. 30 Minuten. Kosten: keine (kostenlose Tarife von Supabase und GitHub).
 

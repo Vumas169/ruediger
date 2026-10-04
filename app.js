@@ -1,10 +1,10 @@
-/* Rüdigers Runden: App-Logik
+/* Piepmanns (früher Rüdigers Runden): App-Logik
    Daten liegen lokal auf dem Handy (funktioniert auch ohne Netz) und werden,
    wenn Supabase eingerichtet ist, mit der gemeinsamen Datenbank abgeglichen. */
 (() => {
   "use strict";
 
-  const APP_VERSION = "0.7.1 vom 03.10.2026";
+  const APP_VERSION = "0.8 vom 04.10.2026";
 
   // ---------- Einstellungen ----------
   const CFG = Object.assign({

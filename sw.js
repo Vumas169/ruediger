@@ -1,6 +1,6 @@
 // Service Worker: hält die App offline verfügbar und lädt Updates automatisch.
 // Eigene Dateien kommen immer frisch aus dem Netz (bei Funkloch aus dem Speicher).
-const CACHE = "ruediger-v15";
+const CACHE = "ruediger-v16";
 const SHELL = [
   "./",
   "./index.html",
@@ -9,10 +9,10 @@ const SHELL = [
   "./config.js",
   "./lib/supabase.js",
   "./manifest.webmanifest",
-  "./icons/icon-192.png",
-  "./icons/icon-512.png",
-  "./icons/icon-maskable-512.png",
-  "./icons/apple-touch-icon.png"
+  "./icons/icon-192.png?v=2",
+  "./icons/icon-512.png?v=2",
+  "./icons/icon-maskable-512.png?v=2",
+  "./icons/apple-touch-icon.png?v=2"
 ];
 
 self.addEventListener("install", (e) => {
@@ -53,7 +53,7 @@ self.addEventListener("fetch", (e) => {
 self.addEventListener("push", (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data ? e.data.text() : "" }; }
-  e.waitUntil(self.registration.showNotification(d.title || "Rüdiger", {
+  e.waitUntil(self.registration.showNotification(d.title || "Piepmanns", {
     body: d.body || "",
     icon: "icons/icon-192.png",
     badge: "icons/icon-192.png",
