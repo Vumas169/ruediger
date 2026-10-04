@@ -4,7 +4,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "0.8 vom 04.10.2026";
+  const APP_VERSION = "0.9 vom 04.10.2026";
 
   // ---------- Einstellungen ----------
   const CFG = Object.assign({
@@ -701,6 +701,8 @@
   let holidayState = ls.get("rr.holidays", "BE");
   let calMonth = calToday().slice(0, 8) + "01";
   let calSel = calToday();
+  let calMode = ls.get("rr.calMode", "month"); // "month" oder "week" (7 Tage ab calWeekStart)
+  let calWeekStart = calToday();
   let evEditing = null, evWho = [me], evAllDay = false, evRemind = [60], evColorSel = "", evOcc = null, evDelArmed = false;
 
   const calEvents = () => Object.values(items).filter((i) => i.kind === "event" && i.data && i.data.start);
@@ -904,6 +906,12 @@
     return chip;
   }
   function renderCal() {
+    const week = calMode === "week";
+    document.querySelectorAll("#calMode .segbtn").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === calMode)));
+    $("calMonthWrap").hidden = week;
+    $("calDayBlock").hidden = week;
+    $("calWeekList").hidden = !week;
+    if (week) { renderWeek(); renderUpcoming(addDays(calWeekStart, 7)); return; }
     const lead = (parseYmd(calMonth).getDay() + 6) % 7;
     const gridStart = addDays(calMonth, -lead);
     const monthEnd = addDays(addInterval(calMonth, 1, "m"), -1);
@@ -950,7 +958,9 @@
     if (!sel.length) dayList.append(h("li", { class: "evempty" }, "Keine Termine"));
     for (const e of sel) dayList.append(entryNode(e, false));
     // Demnächst: die nächsten Einträge nach dem gewählten Tag (mindestens ab morgen)
-    const upFrom = addDays(calSel > t ? calSel : t, 1);
+    renderUpcoming(addDays(calSel > t ? calSel : t, 1));
+  }
+  function renderUpcoming(upFrom) {
     const upMap = calMap(upFrom, addDays(upFrom, 60));
     const up = [], seen = new Set();
     for (const day of Object.keys(upMap).sort()) {
@@ -961,11 +971,45 @@
       if (up.length >= 6) break;
     }
     $("calUpBlock").hidden = !up.length;
+    $("calUpBlock").querySelector("h2").textContent = calMode === "week" ? "Danach" : "Demnächst";
     const ul = $("calUpcoming");
     ul.textContent = "";
     for (const e of up.slice(0, 6)) ul.append(entryNode(e, true));
   }
-  function calGoToday() { calSel = calToday(); calMonth = calSel.slice(0, 8) + "01"; }
+  function calGoToday() { calSel = calWeekStart = calToday(); calMonth = calSel.slice(0, 8) + "01"; }
+  function calStep(dir) {
+    if (calMode === "week") { calWeekStart = addDays(calWeekStart, 7 * dir); calSel = calWeekStart; calMonth = calSel.slice(0, 8) + "01"; }
+    else calMonth = addInterval(calMonth, dir, "m");
+    render();
+  }
+  function calTitle() {
+    if (calMode !== "week") return parseYmd(calMonth).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+    const a = parseYmd(calWeekStart), b = parseYmd(addDays(calWeekStart, 6));
+    const left = a.getMonth() === b.getMonth() ? a.getDate() + "." : a.toLocaleDateString("de-DE", { day: "numeric", month: "short" });
+    return left + " – " + b.toLocaleDateString("de-DE", { day: "numeric", month: "short" });
+  }
+  // Wochenansicht: 7 Tage untereinander, Termine in voller Länge
+  function renderWeek() {
+    const t = calToday();
+    const end = addDays(calWeekStart, 6);
+    const map = calMap(calWeekStart, end);
+    const ol = $("calWeekList");
+    ol.textContent = "";
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(calWeekStart, i);
+      const list = map[d] || [];
+      const rel = d === t ? "Heute" : d === addDays(t, 1) ? "Morgen" : "";
+      const add = button("+", "iconbtn dark small", () => openEvSheet(null, null, d));
+      add.setAttribute("aria-label", "Termin am " + fmtDate(d) + " eintragen");
+      const head = h("div", { class: "weekhead" },
+        h("span", { class: "weekday" }, parseYmd(d).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" })),
+        h("span", { class: "weekrel" }, rel), add);
+      const items = h("ol", { class: "evlist compact" });
+      if (!list.length) items.append(h("li", { class: "evempty" }, "Frei"));
+      for (const e of list) items.append(entryNode(e, false));
+      ol.append(h("li", { class: "weekdayrow" + (d === t ? " today" : "") + (list.some((e) => e.type === "hol") ? " holiday" : "") }, head, items));
+    }
+  }
 
   function renderTodayEvents(isToday) {
     const box = $("todayEvents");
@@ -1092,7 +1136,10 @@
     saveItem(item);
     closeSheet();
     // bei Serien auf dem bearbeiteten Tag bleiben, sonst zum (neuen) Beginn springen
-    if (!(old && evOcc && isRecurring(data))) { calSel = sDate; calMonth = sDate.slice(0, 8) + "01"; }
+    if (!(old && evOcc && isRecurring(data))) {
+      calSel = sDate; calMonth = sDate.slice(0, 8) + "01";
+      if (sDate < calWeekStart || sDate > addDays(calWeekStart, 6)) calWeekStart = sDate;
+    }
     render();
     toast(old ? "Termin gespeichert" : "Termin eingetragen");
     // Die anderen informieren, sobald der Termin in der Datenbank ist
@@ -1128,22 +1175,25 @@
   }
 
   function bindCalendar() {
-    $("calPrev").onclick = () => { calMonth = addInterval(calMonth, -1, "m"); render(); };
-    $("calNextBtn").onclick = () => { calMonth = addInterval(calMonth, 1, "m"); render(); };
+    $("calPrev").onclick = () => calStep(-1);
+    $("calNextBtn").onclick = () => calStep(1);
+    document.querySelectorAll("#calMode .segbtn").forEach((b) => b.addEventListener("click", () => {
+      calMode = b.dataset.mode; ls.set("rr.calMode", calMode);
+      calWeekStart = calSel; // Woche beginnt beim gewählten Tag
+      render();
+    }));
     $("calMonthBtn").onclick = () => { calGoToday(); render(); };
     // Monat wechseln durch Wischen über das Raster
     let touch = null;
-    const grid = $("calGrid");
-    grid.addEventListener("touchstart", (e) => { const t = e.touches[0]; touch = { x: t.clientX, y: t.clientY }; }, { passive: true });
-    grid.addEventListener("touchend", (e) => {
-      if (!touch) return;
-      const t = e.changedTouches[0], dx = t.clientX - touch.x, dy = t.clientY - touch.y;
-      touch = null;
-      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-        calMonth = addInterval(calMonth, dx < 0 ? 1 : -1, "m");
-        render();
-      }
-    }, { passive: true });
+    for (const el of [$("calGrid"), $("calWeekList")]) {
+      el.addEventListener("touchstart", (e) => { const t = e.touches[0]; touch = { x: t.clientX, y: t.clientY }; }, { passive: true });
+      el.addEventListener("touchend", (e) => {
+        if (!touch) return;
+        const t = e.changedTouches[0], dx = t.clientX - touch.x, dy = t.clientY - touch.y;
+        touch = null;
+        if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) calStep(dx < 0 ? 1 : -1);
+      }, { passive: true });
+    }
     $("calAdd").onclick = () => openEvSheet(null);
     $("evClose").onclick = closeSheet;
     $("evSheet").addEventListener("submit", (e) => { e.preventDefault(); submitEv(); });
@@ -1186,7 +1236,7 @@
     $("viewTitle").hidden = !compact || view === "cal";
     $("viewTitle").textContent = VIEW_TITLES[view] || "";
     $("calNav").hidden = view !== "cal";
-    $("calMonthBtn").textContent = parseYmd(calMonth).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+    $("calMonthBtn").textContent = calTitle();
     document.querySelector(".daynav").hidden = compact;
     $("dayEyebrow").textContent = viewDay === t ? "Heute" : viewDay === addDays(t, -1) ? "Gestern" : "Nachtragen";
     $("dayDate").textContent = fmtDateShort(viewDay);
@@ -1548,7 +1598,7 @@
       "Termine gelten für eine Person oder für beide. Standardfarbe nach Person: " + CFG.WALKERS.join(" und ") + " jeweils eigene Farbe, beide blau. Im Termin lässt sich auch eine andere Farbe wählen.",
       "Rüdigers Behandlungen sind türkis, Feiertage rot hinterlegt. Das Bundesland für die Feiertage steht unter Optionen.",
       "Mehrtägige Termine erscheinen als durchgehender Balken.",
-      "Monat wechseln: Pfeile oben oder über das Raster wischen. Tippen auf den Monat springt zu heute. Beim Öffnen des Kalenders ist immer heute gewählt.",
+      "Oben zwischen Monat und Woche umschalten. Die Woche zeigt 7 Tage ab dem gewählten Tag mit vollständigen Terminen. Blättern: Pfeile oben oder seitlich wischen. Tippen auf den Monat springt zu heute. Beim Öffnen des Kalenders ist immer heute gewählt.",
       "Tippen auf einen Tag zeigt seine Termine, + Termin legt einen neuen Termin für diesen Tag an.",
       "Erinnerungen: Zeitpunkte antippen oder unter \"Eigene\" einen eigenen Wert hinzufügen. Sie kommen nur an die Personen, für die der Termin gilt, bei ganztägigen Terminen um 8 Uhr.",
       "Trägt jemand einen neuen Termin ein, bekommt die andere Person eine Benachrichtigung.",

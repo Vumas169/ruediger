@@ -473,3 +473,15 @@ textarea { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px sol
 .calchip.head { z-index: 2; }
 .two > div { min-width: 0; }
 input[type="date"], input[type="time"] { min-width: 0; max-width: 100%; }
+
+/* Kalender: Umschalter Monat/Woche und Wochenansicht */
+.seg.calmode { grid-template-columns: 1fr 1fr; margin-bottom: 12px; }
+.weeklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.weekdayrow { display: grid; gap: 6px; }
+.weekhead { display: flex; align-items: center; gap: 8px; padding: 0 2px; }
+.weekday { font-weight: 800; font-size: 15px; }
+.weekrel { flex: 1; font-size: 12px; font-weight: 700; color: var(--mark); text-transform: uppercase; letter-spacing: .05em; }
+.weekhead .iconbtn { width: 32px; height: 32px; font-size: 20px; }
+.weekdayrow.holiday .weekday { color: var(--hol); }
+.weekdayrow .evempty { padding: 2px 4px; font-size: 13px; }
+.weekdayrow + .weekdayrow { border-top: 1px solid var(--line); padding-top: 10px; }
